@@ -32,3 +32,15 @@ CONCURRENT_DOWNLOAD_LIMIT = 10
 # 延迟时间
 # 每批下载任务之间的延迟时间（秒）
 DOWNLOAD_DELAY = 0.2
+
+# XPath配置
+XPATHS = {
+    "search_input": "/html/body/div[1]/div/div/div/div[1]/div[2]/div/div[1]/input",
+    "search_button": "/html/body/div[1]/div/div/div/div[1]/div[2]/div/div[1]/a",
+    "search_result": "/html/body/div[1]/div/div/div/div[3]/div[1]/div[1]/div[1]/a",
+    "cover_image": "/html/body/div[1]/div/div/div/div[2]/div/div[1]/div/div[1]/img[3]",
+    "chapter_list": "/html/body/div[1]/div/div/div/div[2]/div/div[2]/div[1]/div[1]/div/div[3]/div",
+    "chapter_group_button": "/html/body/div[1]/div/div/div/div[2]/div/div[2]/div[1]/div[1]/div/div[2]/div",
+    "chapter_image_parent": "/html/body/div[1]/div/div/div/div[4]/div[1]/div[1]/div",
+    "chapter_image": "/html/body/div[1]/div/div/div/div[4]/div[1]/div[1]/div[num]/img"
+}
