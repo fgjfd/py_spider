@@ -1,68 +1,50 @@
-# 可视化界面模块 - 通用版
-# 使用tkinter创建图形用户界面，整合漫画下载功能
+# GUI界面 - 通用漫画下载器
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
-from DrissionPage import ChromiumOptions, ChromiumPage
-from urllib.parse import urlparse, unquote
-import asyncio
 import threading
+import asyncio
 import os
-import sys
-import importlib.util
+import time
+from urllib.parse import urlparse, unquote
+from DrissionPage import ChromiumPage, ChromiumOptions
+from crawler import ComicCrawler
+from downloader import download_cover_image, download_all_chapters
+from utils import zip_main_folder, get_image_dimensions
+from config import SITES, DEFAULT_SITE, BROWSER_PATHS
 
 
-def import_module_from_path(module_name, file_path):
-    """从文件路径导入模块"""
-    spec = importlib.util.spec_from_file_location(module_name, file_path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-class ComicDownloaderGUI:
+class GenericComicDownloaderGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("通用漫画下载器")
-        self.root.geometry("650x700")
+        self.root.geometry("720x900")
         self.root.resizable(True, True)
         
-        self.base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        
-        # 创建主框架
         self.main_frame = ttk.Frame(root, padding="10")
         self.main_frame.pack(fill=tk.BOTH, expand=True)
         
-        # 创建标题
-        self.title_label = ttk.Label(
+        title_label = ttk.Label(
             self.main_frame, 
             text="通用漫画下载器", 
-            font=("微软雅黑", 16, "bold")
+            font=("微软雅黑", 18, "bold")
         )
-        self.title_label.pack(pady=10)
+        title_label.pack(pady=10)
         
-        # 创建输入区域
-        self.input_frame = ttk.LabelFrame(self.main_frame, text="下载设置", padding="10")
-        self.input_frame.pack(fill=tk.X, pady=5)
-        
-        # 网站选择
-        self.site_frame = ttk.Frame(self.input_frame)
+        self.site_frame = ttk.Frame(self.main_frame)
         self.site_frame.pack(fill=tk.X, pady=5)
         
-        ttk.Label(self.site_frame, text="选择网站:", width=10).pack(side=tk.LEFT, padx=5)
-        self.site_var = tk.StringVar(value="快看")
-        site_combobox = ttk.Combobox(
-            self.site_frame,
-            textvariable=self.site_var,
-            values=["快看", "好多漫"],
+        ttk.Label(self.site_frame, text="选择站点:", width=10).pack(side=tk.LEFT, padx=5)
+        self.site_var = tk.StringVar(value=DEFAULT_SITE)
+        self.site_combo = ttk.Combobox(
+            self.site_frame, 
+            textvariable=self.site_var, 
+            values=list(SITES.keys()),
             state="readonly",
-            font=("微软雅黑", 10),
-            width=15
+            width=20
         )
-        site_combobox.pack(side=tk.LEFT, padx=5)
+        self.site_combo.pack(side=tk.LEFT, padx=5)
         
-        # 漫画名称输入
-        self.name_frame = ttk.Frame(self.input_frame)
+        self.name_frame = ttk.Frame(self.main_frame)
         self.name_frame.pack(fill=tk.X, pady=5)
         
         ttk.Label(self.name_frame, text="漫画名称:", width=10).pack(side=tk.LEFT, padx=5)
@@ -74,9 +56,34 @@ class ComicDownloaderGUI:
         )
         self.comic_name_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
         
-        # Cookie输入
-        self.cookie_frame = ttk.Frame(self.input_frame)
-        self.cookie_frame.pack(fill=tk.X, pady=5)
+        self.num_frame = ttk.Frame(self.main_frame)
+        self.num_frame.pack(fill=tk.X, pady=5)
+        
+        ttk.Label(self.num_frame, text="章节范围:", width=10).pack(side=tk.LEFT, padx=5)
+        
+        self.chapter_start_var = tk.StringVar(value="1")
+        self.chapter_start_entry = ttk.Entry(
+            self.num_frame, 
+            textvariable=self.chapter_start_var, 
+            font=("微软雅黑", 10),
+            width=8
+        )
+        self.chapter_start_entry.pack(side=tk.LEFT, padx=2)
+        
+        ttk.Label(self.num_frame, text="到").pack(side=tk.LEFT, padx=2)
+        
+        self.chapter_end_var = tk.StringVar(value="0")
+        self.chapter_end_entry = ttk.Entry(
+            self.num_frame, 
+            textvariable=self.chapter_end_var, 
+            font=("微软雅黑", 10),
+            width=8
+        )
+        self.chapter_end_entry.pack(side=tk.LEFT, padx=2)
+        
+        ttk.Label(self.num_frame, text="(结束填0表示到最后一章)").pack(side=tk.LEFT, padx=5)
+        
+        self.cookie_frame = ttk.Frame(self.main_frame)
         
         ttk.Label(self.cookie_frame, text="Cookie:", width=10).pack(side=tk.LEFT, padx=5)
         self.cookie_var = tk.StringVar()
@@ -87,81 +94,97 @@ class ComicDownloaderGUI:
         )
         self.cookie_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
         
-        # 章节数输入
-        self.chapter_frame = ttk.Frame(self.input_frame)
-        self.chapter_frame.pack(fill=tk.X, pady=5)
+        self.yumanhua_thread_frame = ttk.Frame(self.main_frame)
         
-        ttk.Label(self.chapter_frame, text="章节数量:", width=10).pack(side=tk.LEFT, padx=5)
-        self.comic_num_var = tk.StringVar(value="1")
-        self.comic_num_entry = ttk.Entry(
-            self.chapter_frame, 
-            textvariable=self.comic_num_var, 
+        ttk.Label(self.yumanhua_thread_frame, text="御漫画线程数:", width=12).pack(side=tk.LEFT, padx=5)
+        self.thread_var = tk.StringVar(value="10")
+        self.thread_entry = ttk.Entry(
+            self.yumanhua_thread_frame, 
+            textvariable=self.thread_var, 
             font=("微软雅黑", 10),
             width=10
         )
-        self.comic_num_entry.pack(side=tk.LEFT, padx=5)
+        self.thread_entry.pack(side=tk.LEFT, padx=5)
+        ttk.Label(self.yumanhua_thread_frame, text="(章节收集)").pack(side=tk.LEFT)
         
-        # 下载路径选择
-        self.download_path_frame = ttk.Frame(self.input_frame)
-        self.download_path_frame.pack(fill=tk.X, pady=5)
+        self.download_thread_frame = ttk.Frame(self.main_frame)
+        self.download_thread_frame.pack(fill=tk.X, pady=5)
         
-        ttk.Label(self.download_path_frame, text="下载路径:", width=10).pack(side=tk.LEFT, padx=5)
-        self.download_path_var = tk.StringVar(value=os.path.join(os.path.expanduser("~"), "Downloads"))
+        ttk.Label(self.download_thread_frame, text="下载线程数:", width=12).pack(side=tk.LEFT, padx=5)
+        self.download_thread_var = tk.StringVar(value="4")
+        self.download_thread_entry = ttk.Entry(
+            self.download_thread_frame, 
+            textvariable=self.download_thread_var, 
+            font=("微软雅黑", 10),
+            width=10
+        )
+        self.download_thread_entry.pack(side=tk.LEFT, padx=5)
+        ttk.Label(self.download_thread_frame, text="(多线程+协程)").pack(side=tk.LEFT)
+        
+        def on_site_change(*args):
+            site_name = self.site_var.get()
+            if site_name == "快看":
+                self.cookie_frame.pack(fill=tk.X, pady=5, after=self.num_frame)
+                self.yumanhua_thread_frame.pack_forget()
+            elif site_name == "御漫画":
+                self.cookie_frame.pack_forget()
+                self.yumanhua_thread_frame.pack(fill=tk.X, pady=5, after=self.num_frame)
+            else:
+                self.cookie_frame.pack_forget()
+                self.yumanhua_thread_frame.pack_forget()
+        
+        self.site_var.trace("w", on_site_change)
+        on_site_change()
+        
+        self.path_frame = ttk.Frame(self.main_frame)
+        self.path_frame.pack(fill=tk.X, pady=5)
+        
+        ttk.Label(self.path_frame, text="下载路径:", width=10).pack(side=tk.LEFT, padx=5)
+        self.download_path_var = tk.StringVar()
         self.download_path_entry = ttk.Entry(
-            self.download_path_frame, 
+            self.path_frame, 
             textvariable=self.download_path_var, 
             font=("微软雅黑", 10)
         )
         self.download_path_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
         
-        def browse_download_path():
-            path = filedialog.askdirectory(
-                title="选择下载路径",
-                initialdir=self.download_path_var.get()
-            )
-            if path:
-                self.download_path_var.set(path)
-        
         ttk.Button(
-            self.download_path_frame, 
+            self.path_frame, 
             text="浏览", 
-            command=browse_download_path,
+            command=self.browse_path,
             width=8
         ).pack(side=tk.LEFT, padx=5)
         
-        # 浏览器选择
-        self.browser_frame = ttk.LabelFrame(self.input_frame, text="浏览器设置", padding="10")
-        self.browser_frame.pack(fill=tk.X, pady=5)
+        self.browser_frame = ttk.LabelFrame(self.main_frame, text="浏览器设置", padding="10")
+        self.browser_frame.pack(fill=tk.X, pady=10)
         
-        # 浏览器类型选择
         self.browser_type_frame = ttk.Frame(self.browser_frame)
         self.browser_type_frame.pack(fill=tk.X, pady=3)
         
         ttk.Label(self.browser_type_frame, text="浏览器类型:", width=10).pack(side=tk.LEFT, padx=5)
         self.browser_type_var = tk.StringVar(value="edge")
-        browser_type_frame_inner = ttk.Frame(self.browser_type_frame)
-        browser_type_frame_inner.pack(side=tk.LEFT, fill=tk.X, expand=True)
         
         ttk.Radiobutton(
-            browser_type_frame_inner, 
+            self.browser_type_frame, 
             text="Edge", 
             variable=self.browser_type_var, 
-            value="edge"
+            value="edge",
+            command=self.update_browser_path
         ).pack(side=tk.LEFT, padx=10)
         
         ttk.Radiobutton(
-            browser_type_frame_inner, 
+            self.browser_type_frame, 
             text="Chrome", 
             variable=self.browser_type_var, 
-            value="chrome"
+            value="chrome",
+            command=self.update_browser_path
         ).pack(side=tk.LEFT, padx=10)
         
-        # 浏览器路径
         self.browser_path_frame = ttk.Frame(self.browser_frame)
         self.browser_path_frame.pack(fill=tk.X, pady=3)
         
         ttk.Label(self.browser_path_frame, text="浏览器路径:", width=10).pack(side=tk.LEFT, padx=5)
-        self.browser_path_var = tk.StringVar(value=r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe")
+        self.browser_path_var = tk.StringVar(value=BROWSER_PATHS['edge'])
         self.browser_path_entry = ttk.Entry(
             self.browser_path_frame, 
             textvariable=self.browser_path_var, 
@@ -169,83 +192,113 @@ class ComicDownloaderGUI:
         )
         self.browser_path_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
         
-        def on_browser_type_change(*args):
-            """当浏览器类型改变时更新默认路径"""
-            browser_type = self.browser_type_var.get()
-            if browser_type == "edge":
-                default_path = r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
-            else:
-                default_path = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
-            self.browser_path_var.set(default_path)
-        
-        # 监听浏览器类型变化
-        self.browser_type_var.trace("w", on_browser_type_change)
-        
-        def browse_browser():
-            path = filedialog.askopenfilename(
-                title="选择浏览器可执行文件",
-                filetypes=[("可执行文件", "*.exe"), ("所有文件", "*.*")]
-            )
-            if path:
-                self.browser_path_var.set(path)
-        
         ttk.Button(
             self.browser_path_frame, 
             text="浏览", 
-            command=browse_browser,
+            command=self.browse_browser,
             width=8
         ).pack(side=tk.LEFT, padx=5)
         
-        # 浏览器模式选择
         self.browser_mode_frame = ttk.Frame(self.browser_frame)
         self.browser_mode_frame.pack(fill=tk.X, pady=3)
         
         ttk.Label(self.browser_mode_frame, text="浏览器模式:", width=10).pack(side=tk.LEFT, padx=5)
         self.browser_mode_var = tk.StringVar(value="headed")
-        browser_mode_frame_inner = ttk.Frame(self.browser_mode_frame)
-        browser_mode_frame_inner.pack(side=tk.LEFT, fill=tk.X, expand=True)
         
         ttk.Radiobutton(
-            browser_mode_frame_inner, 
+            self.browser_mode_frame, 
             text="有头模式", 
             variable=self.browser_mode_var, 
             value="headed"
         ).pack(side=tk.LEFT, padx=10)
         
         ttk.Radiobutton(
-            browser_mode_frame_inner, 
+            self.browser_mode_frame, 
             text="无头模式", 
             variable=self.browser_mode_var, 
             value="headless"
         ).pack(side=tk.LEFT, padx=10)
         
-        # 按钮区域
+
+        
         self.button_frame = ttk.Frame(self.main_frame)
         self.button_frame.pack(fill=tk.X, pady=10)
         
         self.confirm_button = ttk.Button(
-            self.button_frame, 
-            text="确定", 
+            self.button_frame,
+            text="开始下载",
             command=self.start_download,
             style="Accent.TButton"
         )
         self.confirm_button.pack(side=tk.RIGHT, padx=5)
         
-        self.clear_button = ttk.Button(
-            self.button_frame, 
-            text="清空状态", 
+        ttk.Button(
+            self.button_frame,
+            text="清空状态",
             command=self.clear_status
-        )
-        self.clear_button.pack(side=tk.LEFT, padx=5)
+        ).pack(side=tk.LEFT, padx=5)
         
-        self.exit_button = ttk.Button(
-            self.button_frame, 
-            text="退出", 
+        ttk.Button(
+            self.button_frame,
+            text="下载失败图片",
+            command=self.download_failed_images
+        ).pack(side=tk.LEFT, padx=5)
+        
+        ttk.Button(
+            self.button_frame,
+            text="退出",
             command=root.quit
-        )
-        self.exit_button.pack(side=tk.RIGHT, padx=5)
+        ).pack(side=tk.RIGHT, padx=5)
         
-        # 状态显示区域
+        self.url_progress_frame = ttk.LabelFrame(self.main_frame, text="获取图片URL进度", padding="10")
+        self.url_progress_frame.pack(fill=tk.X, pady=5)
+        
+        self.url_info_frame = ttk.Frame(self.url_progress_frame)
+        self.url_info_frame.pack(fill=tk.X, pady=5)
+        
+        self.url_progress_label = ttk.Label(
+            self.url_info_frame,
+            text="进度: 0/0 个章节",
+            font=("微软雅黑", 10)
+        )
+        self.url_progress_label.pack(side=tk.LEFT, padx=5)
+        
+        self.url_progress_bar = ttk.Progressbar(
+            self.url_progress_frame,
+            orient=tk.HORIZONTAL,
+            mode='determinate',
+            length=600
+        )
+        self.url_progress_bar.pack(fill=tk.X, pady=5)
+        
+        self.progress_frame = ttk.LabelFrame(self.main_frame, text="下载进度", padding="10")
+        self.progress_frame.pack(fill=tk.X, pady=5)
+        
+        self.info_frame = ttk.Frame(self.progress_frame)
+        self.info_frame.pack(fill=tk.X, pady=5)
+        
+        self.progress_label = ttk.Label(
+            self.info_frame,
+            text="进度: 0/0 张图片",
+            font=("微软雅黑", 10)
+        )
+        self.progress_label.pack(side=tk.LEFT, padx=5)
+        
+        self.speed_label = ttk.Label(
+            self.info_frame,
+            text="网速: 0 KB/s",
+            font=("微软雅黑", 10)
+        )
+        self.speed_label.pack(side=tk.RIGHT, padx=5)
+        
+        self.progress_bar = ttk.Progressbar(
+            self.progress_frame,
+            orient=tk.HORIZONTAL,
+            mode='determinate',
+            length=600
+        )
+        self.progress_bar.pack(fill=tk.X, pady=5)
+        
         self.status_frame = ttk.LabelFrame(self.main_frame, text="下载状态", padding="10")
         self.status_frame.pack(fill=tk.BOTH, expand=True, pady=5)
         
@@ -257,12 +310,10 @@ class ComicDownloaderGUI:
         )
         self.status_text.pack(fill=tk.BOTH, expand=True)
         
-        # 滚动条
         self.scrollbar = ttk.Scrollbar(self.status_text, command=self.status_text.yview)
         self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.status_text.config(yscrollcommand=self.scrollbar.set)
-        
-        # 配置样式
+
         self.style = ttk.Style()
         self.style.configure(
             "Accent.TButton", 
@@ -270,45 +321,26 @@ class ComicDownloaderGUI:
             background="black",
             font=("微软雅黑", 10, "bold")
         )
-        self.style.map(
-            "Accent.TButton",
-            background=[("active", "gray")]
-        )
     
-    def parse_cookie_str(self, cookie_str, domain):
-        """解析Cookie字符串为DrissionPage可用的格式"""
-        cookies = []
-        items = [item.strip() for item in cookie_str.split(';') if item.strip()]
-        
-        for item in items:
-            if '=' in item:
-                name, value = item.split('=', 1)
-                name = name.strip()
-                value = value.strip()
-                
-                try:
-                    value = unquote(value)
-                except:
-                    pass
-                
-                cookies.append({
-                    'name': name,
-                    'value': value,
-                    'domain': domain,
-                    'path': '/'
-                })
-            else:
-                cookies.append({
-                    'name': item.strip(),
-                    'value': '',
-                    'domain': domain,
-                    'path': '/'
-                })
-        
-        return cookies
+    def browse_path(self):
+        path = filedialog.askdirectory(title="选择下载路径")
+        if path:
+            self.download_path_var.set(path)
+    
+    def browse_browser(self):
+        path = filedialog.askopenfilename(
+            title="选择浏览器可执行文件",
+            filetypes=[("可执行文件", "*.exe"), ("所有文件", "*.*")]
+        )
+        if path:
+            self.browser_path_var.set(path)
+    
+    def update_browser_path(self):
+        browser_type = self.browser_type_var.get()
+        if browser_type in BROWSER_PATHS:
+            self.browser_path_var.set(BROWSER_PATHS[browser_type])
     
     def append_status(self, text):
-        """向状态文本框添加内容"""
         self.status_text.config(state=tk.NORMAL)
         self.status_text.insert(tk.END, text + "\n")
         self.status_text.see(tk.END)
@@ -316,172 +348,187 @@ class ComicDownloaderGUI:
         self.root.update()
     
     def clear_status(self):
-        """清空状态文本框"""
         self.status_text.config(state=tk.NORMAL)
         self.status_text.delete(1.0, tk.END)
         self.status_text.config(state=tk.DISABLED)
+        self.reset_progress()
     
-    def get_site_modules(self):
-        """获取选中网站的模块"""
-        site_name = self.site_var.get()
-        if site_name == "快看":
-            site_dir = os.path.join(self.base_path, "快看")
-        else:
-            site_dir = os.path.join(self.base_path, "好多漫漫画")
+    def reset_url_progress(self, total_chapters=0):
+        self.total_chapters = total_chapters
+        self.collected_chapters = 0
         
-        config = import_module_from_path(f"{site_name}_config", os.path.join(site_dir, "config.py"))
-        crawler = import_module_from_path(f"{site_name}_crawler", os.path.join(site_dir, "crawler.py"))
-        downloader = import_module_from_path(f"{site_name}_downloader", os.path.join(site_dir, "downloader.py"))
-        utils = import_module_from_path(f"{site_name}_utils", os.path.join(site_dir, "utils.py"))
+        self.url_progress_bar['value'] = 0
+        self.url_progress_bar['maximum'] = total_chapters if total_chapters > 0 else 1
+        self.url_progress_label.config(text=f"进度: 0/{total_chapters} 个章节")
+    
+    def update_url_progress(self):
+        self.collected_chapters += 1
+        self.url_progress_bar['value'] = self.collected_chapters
+        self.url_progress_label.config(text=f"进度: {self.collected_chapters}/{self.total_chapters} 个章节")
+        self.root.update()
+    
+    def reset_progress(self, total_images=0):
+        self.total_images = total_images
+        self.downloaded_images = 0
+        self.total_downloaded_bytes = 0
+        self.start_time = time.time()
+        self.last_update_time = self.start_time
+        self.last_downloaded_bytes = 0
         
-        return config, crawler, downloader, utils
+        self.progress_bar['value'] = 0
+        self.progress_bar['maximum'] = total_images if total_images > 0 else 1
+        self.progress_label.config(text=f"进度: 0/{total_images} 张图片")
+        self.speed_label.config(text="网速: 0 KB/s")
+    
+    def update_progress(self, downloaded_bytes=0):
+        self.downloaded_images += 1
+        self.total_downloaded_bytes += downloaded_bytes
+        
+        current_time = time.time()
+        elapsed = current_time - self.last_update_time
+        
+        if elapsed >= 0.5:
+            speed_bytes = self.total_downloaded_bytes - self.last_downloaded_bytes
+            speed_kb = speed_bytes / elapsed / 1024
+            self.last_update_time = current_time
+            self.last_downloaded_bytes = self.total_downloaded_bytes
+            
+            if speed_kb >= 1024:
+                speed_str = f"{speed_kb / 1024:.2f} MB/s"
+            else:
+                speed_str = f"{speed_kb:.2f} KB/s"
+            self.speed_label.config(text=f"网速: {speed_str}")
+        
+        self.progress_bar['value'] = self.downloaded_images
+        self.progress_label.config(text=f"进度: {self.downloaded_images}/{self.total_images} 张图片")
+        self.root.update()
     
     def download_task(self):
-        """下载任务函数"""
         try:
-            config, crawler, downloader, utils = self.get_site_modules()
+            site_name = self.site_var.get()
+            if site_name not in SITES:
+                messagebox.showerror("错误", "请选择有效的站点")
+                return
             
-            # 获取用户输入
             comic_name = self.comic_name_var.get().strip()
             if not comic_name:
                 messagebox.showerror("错误", "请输入漫画名称")
                 return
             
-            comic_num_str = self.comic_num_var.get().strip()
-            if not comic_num_str.isdigit() or int(comic_num_str) <= 0:
-                messagebox.showerror("错误", "请输入有效的章节数量")
-                return
-            comic_num = int(comic_num_str)
-            
-            browser_path = self.browser_path_var.get().strip()
-            if not browser_path or not os.path.exists(browser_path):
-                messagebox.showerror("错误", "浏览器路径无效")
+            try:
+                chapter_start = int(self.chapter_start_var.get().strip() or "1")
+                chapter_end = int(self.chapter_end_var.get().strip() or "0")
+            except ValueError:
+                messagebox.showerror("错误", "章节范围必须是数字")
                 return
             
-            browser_mode = self.browser_mode_var.get()
+            if chapter_start < 1:
+                messagebox.showerror("错误", "起始章节必须大于等于1")
+                return
+            
+            if chapter_end > 0 and chapter_end < chapter_start:
+                messagebox.showerror("错误", "结束章节必须大于等于起始章节")
+                return
+            
             browser_type = self.browser_type_var.get()
+            browser_path = self.browser_path_var.get().strip()
+            headless = self.browser_mode_var.get() == "headless"
+            
+
             
             self.confirm_button.config(state=tk.DISABLED)
-            
-            self.append_status(f"正在初始化浏览器... (类型: {browser_type}, 模式: {browser_mode})")
-            co = ChromiumOptions().set_paths(browser_path)
-            
-            if browser_mode == "headless":
-                co.headless()
-                co.set_argument("--disable-gpu")
-                co.set_argument("--no-sandbox")
-                co.set_argument("--disable-dev-shm-usage")
-                self.append_status("已启用无头模式")
-            
-            tab = ChromiumPage(co)
-            cookie = self.cookie_var.get().strip()
-            site_name = self.site_var.get()
+            self.append_status(f"使用站点: {site_name}")
+            self.append_status(f"开始下载漫画: {comic_name}")
+            if chapter_end > 0:
+                self.append_status(f"下载章节范围: 第{chapter_start}章 到 第{chapter_end}章")
+            else:
+                self.append_status(f"下载章节范围: 第{chapter_start}章 到 最后一章")
+            self.append_status(f"浏览器模式: {'无头' if headless else '有头'}")
+
+            self.append_status("正在启动浏览器...")
+            cookie = self.cookie_var.get().strip() if site_name == "快看" else None
+            crawler = ComicCrawler(site_name, browser_path, headless, cookie)
             
             try:
-                self.append_status(f"访问网站: {config.COMIC_SITE_URL}")
-                tab.get(config.COMIC_SITE_URL)
+                self.append_status(f"正在搜索漫画: {comic_name}")
+                target_comic_tab = crawler.search_comic(comic_name)
+                self.append_status("成功打开漫画详情页")
                 
-                if cookie:
-                    self.append_status("正在设置Cookie...")
-                    try:
-                        domain = urlparse(config.COMIC_SITE_URL).netloc
-                        cookies = self.parse_cookie_str(cookie, domain)
-                        self.append_status(f"解析到 {len(cookies)} 个Cookie项")
-                        tab.set.cookies(cookies)
-                        self.append_status("Cookie已设置")
-                        self.append_status("刷新页面应用Cookie...")
-                        tab.refresh()
-                        self.append_status("Cookie已应用")
-                        
-                        self.append_status(f"正在搜索漫画: {comic_name}")
-                        tab.ele(f"xpath:{config.XPATHS['search_input']}").input(comic_name)
-                        tab.ele(f"xpath:{config.XPATHS['search_button']}").click()
-                        import time
-                        time.sleep(0.5)
-                        target_comic_list = tab.ele(f"xpath:{config.XPATHS['search_result']}")
-                        
-                        if site_name == "快看":
-                            target_comic_tab = target_comic_list.click.for_new_tab()
-                        else:
-                            href = target_comic_list.attr('href')
-                            target_comic_tab = tab.new_tab(href)
-                        
-                        self.append_status("成功打开漫画详情页")
-                    except Exception as e:
-                        self.append_status(f"设置Cookie失败: {str(e)}")
-                        self.append_status(f"正在搜索漫画: {comic_name}")
-                        tab.ele(f"xpath:{config.XPATHS['search_input']}").input(comic_name)
-                        tab.ele(f"xpath:{config.XPATHS['search_button']}").click()
-                        import time
-                        time.sleep(0.5)
-                        target_comic_list = tab.ele(f"xpath:{config.XPATHS['search_result']}")
-                        
-                        if site_name == "快看":
-                            target_comic_tab = target_comic_list.click.for_new_tab()
-                        else:
-                            href = target_comic_list.attr('href')
-                            target_comic_tab = tab.new_tab(href)
-                        
-                        self.append_status("成功打开漫画详情页")
-                else:
-                    self.append_status("未提供Cookie，跳过设置")
-                    self.append_status(f"正在搜索漫画: {comic_name}")
-                    tab.ele(f"xpath:{config.XPATHS['search_input']}").input(comic_name)
-                    tab.ele(f"xpath:{config.XPATHS['search_button']}").click()
-                    import time
-                    time.sleep(0.5)
-                    target_comic_list = tab.ele(f"xpath:{config.XPATHS['search_result']}")
-                    
-                    if site_name == "快看":
-                        target_comic_tab = target_comic_list.click.for_new_tab()
-                    else:
-                        href = target_comic_list.attr('href')
-                        target_comic_tab = tab.new_tab(href)
-                    
-                    self.append_status("成功打开漫画详情页")
+                self.append_status("正在获取封面图片...")
+                cover_url = crawler.get_cover_image(target_comic_tab)
                 
-                self.append_status("Cookie已准备就绪")
+                self.append_status("正在获取章节数量...")
+                total_chapters = crawler.get_chapter_count(target_comic_tab)
                 
-                try:
-                    coverimg_xpath = "xpath:" + config.XPATHS['cover_image']
-                    coverimg_url = target_comic_tab.ele(coverimg_xpath).attr("src")
-                    self.append_status(f"封面图片URL: {coverimg_url}")
-                except Exception as e:
-                    self.append_status(f"获取封面图片失败: {e}")
-                    coverimg_url = None
+                # 计算实际下载范围
+                actual_start = chapter_start
+                actual_end = min(chapter_end, total_chapters) if chapter_end > 0 else total_chapters
+                actual_chapters = actual_end - actual_start + 1
                 
-                self.append_status(f"正在收集第1-{comic_num}章的图片链接...")
+                self.append_status(f"总章节数: {total_chapters}, 将下载: {actual_start}-{actual_end} 共{actual_chapters}章")
+                self.reset_url_progress(actual_chapters)
                 
-                if site_name == "快看":
-                    all_chapters_data = crawler.collect_chapters_images(target_comic_tab, comic_num)
-                else:
-                    all_chapters_data = crawler.collect_chapters_images(target_comic_tab, comic_num, tab)
+                self.append_status("正在收集章节图片链接...")
+                max_workers = int(self.thread_var.get().strip())
                 
-                if all_chapters_data:
-                    self.append_status(f"成功收集到 {len(all_chapters_data)} 个章节的图片链接")
-                else:
-                    self.append_status("没有获取到任何章节的图片链接")
+                all_chapters_data = crawler.collect_chapters_images(
+                    target_comic_tab, 
+                    chapter_start=actual_start,
+                    chapter_end=actual_end,
+                    max_workers=max_workers, 
+                    progress_callback=self.update_url_progress
+                )
+
+                self.append_status(f"将下载 {len(all_chapters_data)} 个章节")
+                
+                total_images = sum(len(c['herf_list']) for c in all_chapters_data)
+                self.reset_progress(total_images)
+                self.append_status(f"总计 {total_images} 张图片")
                 
                 download_path = self.download_path_var.get().strip()
                 
-                if coverimg_url:
-                    self.append_status(f"正在下载封面图片...")
-                    asyncio.run(downloader.download_cover_image(coverimg_url, comic_name, download_path if download_path else None))
-                    self.append_status("封面图片下载完成")
+                if cover_url:
+                    self.append_status("正在下载封面...")
+                    asyncio.run(download_cover_image(cover_url, comic_name, download_path if download_path else None))
                 
                 if all_chapters_data:
-                    self.append_status("正在下载章节图片...")
-                    asyncio.run(downloader.download_all_chapters(all_chapters_data, comic_name, download_path if download_path else None))
-                    self.append_status("章节图片下载完成")
-                
-                self.append_status("正在压缩文件夹...")
-                utils.zip_main_folder(comic_name, download_path if download_path else None)
-                self.append_status("文件夹压缩完成")
-                
-                messagebox.showinfo("成功", f"漫画 {comic_name} 下载完成！")
+                    self.append_status("开始下载章节图片...")
+                    download_thread_count = int(self.download_thread_var.get().strip())
+                    failed_downloads, failed_json_path, should_zip = asyncio.run(
+                        download_all_chapters(
+                            all_chapters_data,
+                            comic_name,
+                            download_path if download_path else None,
+                            download_thread_count=download_thread_count,
+                            progress_callback=self.update_progress,
+                            max_retries=3
+                        )
+                    )
+
+                    if failed_downloads:
+                        self.append_status(f"\n⚠️  注意：以下图片最终下载失败（共 {len(failed_downloads)} 张）:")
+                        for failed in failed_downloads:
+                            self.append_status(f"  - 章节{failed['chapter_num']}-第{failed['image_index']}张")
+                            self.append_status(f"    路径: {failed['path']}")
+                            self.append_status(f"    URL: {failed['url']}")
+                        self.append_status(f"\n失败列表已保存到: {failed_json_path}")
+
+                    if should_zip:
+                        self.append_status("正在获取图片尺寸...")
+                        get_image_dimensions(comic_name, download_path if download_path else None)
+
+                        self.append_status("正在压缩文件夹...")
+                        zip_main_folder(comic_name, download_path if download_path else None)
+
+                        self.append_status(f"✓ 漫画《{comic_name}》下载完成！")
+                        messagebox.showinfo("成功", f"漫画《{comic_name}》下载完成！")
+                    else:
+                        self.append_status("⚠️ 由于存在下载失败的图片，跳过压缩步骤")
+                        self.append_status(f"✓ 漫画《{comic_name}》下载完成（有失败图片）！")
+                        messagebox.showwarning("完成", f"漫画《{comic_name}》下载完成！\n\n注意：有 {len(failed_downloads)} 张图片最终下载失败。\n失败列表已保存到:\n{failed_json_path}\n\n请使用'下载失败图片'功能重新下载。")
                 
             finally:
-                tab.close()
+                crawler.page.close()
                 self.append_status("浏览器已关闭")
                 
         except Exception as e:
@@ -493,16 +540,81 @@ class ComicDownloaderGUI:
             self.confirm_button.config(state=tk.NORMAL)
     
     def start_download(self):
-        """开始下载"""
         download_thread = threading.Thread(target=self.download_task)
         download_thread.daemon = True
         download_thread.start()
 
+    def download_failed_images(self):
+        """从失败列表JSON文件下载失败图片"""
+        json_path = filedialog.askopenfilename(
+            title="选择失败列表JSON文件",
+            filetypes=[("JSON文件", "*.json"), ("所有文件", "*.*")]
+        )
+        if not json_path:
+            return
+
+        def retry_task():
+            try:
+                self.confirm_button.config(state=tk.DISABLED)
+                self.append_status(f"\n{'='*50}")
+                self.append_status("开始下载失败图片...")
+                self.append_status(f"JSON文件: {json_path}")
+
+                # 读取JSON获取总图片数
+                import json
+                with open(json_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                total_images = len(data['failed_images'])
+                self.reset_progress(total_images)
+
+                download_thread_count = int(self.download_thread_var.get().strip())
+
+                # 导入函数
+                from downloader import download_from_failed_json
+
+                still_failed, all_success, image_dimensions = asyncio.run(
+                    download_from_failed_json(
+                        json_path,
+                        concurrent_limit=3,
+                        download_thread_count=download_thread_count,
+                        use_thread_coroutine=True,
+                        progress_callback=self.update_progress,
+                        max_retries=3
+                    )
+                )
+
+                if all_success:
+                    self.append_status(f"\n✓ 所有失败图片下载成功！")
+                    if image_dimensions:
+                        self.append_status(f"图片宽高信息已保存到 image_dimensions.json")
+                    messagebox.showinfo("成功", "所有失败图片下载成功！")
+                else:
+                    self.append_status(f"\n⚠️ 仍有 {len(still_failed)} 张图片下载失败")
+                    for failed in still_failed:
+                        self.append_status(f"  - 章节{failed['chapter_num']}-第{failed['image_index']}张: {failed['url']}")
+                    self.append_status(f"\n更新后的失败列表已保存")
+                    if image_dimensions:
+                        self.append_status(f"成功图片的宽高信息已保存到 image_dimensions.json")
+                    messagebox.showwarning("完成", f"部分图片下载成功，仍有 {len(still_failed)} 张失败。\n更新后的失败列表已保存。")
+
+                self.append_status(f"{'='*50}")
+
+            except Exception as e:
+                self.append_status(f"下载失败图片时出错: {e}")
+                import traceback
+                self.append_status(traceback.format_exc())
+                messagebox.showerror("错误", f"下载失败图片时出错: {e}")
+            finally:
+                self.confirm_button.config(state=tk.NORMAL)
+
+        retry_thread = threading.Thread(target=retry_task)
+        retry_thread.daemon = True
+        retry_thread.start()
+
 
 def main():
-    """主函数"""
     root = tk.Tk()
-    app = ComicDownloaderGUI(root)
+    app = GenericComicDownloaderGUI(root)
     root.mainloop()
 
 
