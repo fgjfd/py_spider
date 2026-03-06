@@ -9,7 +9,7 @@ from urllib.parse import urlparse, unquote
 from DrissionPage import ChromiumPage, ChromiumOptions
 from crawler import ComicCrawler
 from downloader import download_cover_image, download_all_chapters
-from utils import zip_main_folder, get_image_dimensions
+from utils import zip_main_folder
 from config import SITES, DEFAULT_SITE, BROWSER_PATHS
 
 
@@ -17,11 +17,39 @@ class GenericComicDownloaderGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("通用漫画下载器")
-        self.root.geometry("720x900")
+        self.root.geometry("900x700")
         self.root.resizable(True, True)
         
-        self.main_frame = ttk.Frame(root, padding="10")
-        self.main_frame.pack(fill=tk.BOTH, expand=True)
+        # 创建主画布和滚动条
+        self.canvas = tk.Canvas(root, highlightthickness=0)
+        self.scrollbar = ttk.Scrollbar(root, orient="vertical", command=self.canvas.yview)
+        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+        
+        self.canvas.pack(side="left", fill="both", expand=True)
+        self.scrollbar.pack(side="right", fill="y")
+        
+        # 创建内部Frame
+        self.main_frame = ttk.Frame(self.canvas, padding="10")
+        
+        # 在Canvas中创建窗口，固定宽度避免抖动
+        self.canvas_window = self.canvas.create_window((0, 0), window=self.main_frame, anchor="nw", width=860)
+        
+        # 绑定配置事件更新滚动区域和窗口宽度
+        def on_frame_configure(event=None):
+            self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+        
+        def on_canvas_configure(event=None):
+            # Canvas大小改变时，更新内部窗口宽度
+            canvas_width = event.width
+            self.canvas.itemconfig(self.canvas_window, width=canvas_width)
+        
+        self.main_frame.bind("<Configure>", on_frame_configure)
+        self.canvas.bind("<Configure>", on_canvas_configure)
+        
+        # 绑定鼠标滚轮
+        def on_mousewheel(event):
+            self.canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        self.canvas.bind_all("<MouseWheel>", on_mousewheel)
         
         title_label = ttk.Label(
             self.main_frame, 
@@ -119,7 +147,47 @@ class GenericComicDownloaderGUI:
             width=10
         )
         self.download_thread_entry.pack(side=tk.LEFT, padx=5)
-        ttk.Label(self.download_thread_frame, text="(多线程+协程)").pack(side=tk.LEFT)
+        
+        # 下载模式选择
+        self.download_mode_var = tk.StringVar(value="coroutine")
+        ttk.Radiobutton(
+            self.download_thread_frame, 
+            text="协程模式", 
+            variable=self.download_mode_var, 
+            value="coroutine"
+        ).pack(side=tk.LEFT, padx=5)
+        ttk.Radiobutton(
+            self.download_thread_frame, 
+            text="纯多线程", 
+            variable=self.download_mode_var, 
+            value="thread_only"
+        ).pack(side=tk.LEFT, padx=5)
+        
+        # 超时时间设置
+        self.timeout_frame = ttk.Frame(self.main_frame)
+        self.timeout_frame.pack(fill=tk.X, pady=5)
+        
+        ttk.Label(self.timeout_frame, text="首次超时:", width=10).pack(side=tk.LEFT, padx=5)
+        self.first_timeout_var = tk.StringVar(value="8")
+        self.first_timeout_entry = ttk.Entry(
+            self.timeout_frame, 
+            textvariable=self.first_timeout_var, 
+            font=("微软雅黑", 10),
+            width=8
+        )
+        self.first_timeout_entry.pack(side=tk.LEFT, padx=5)
+        ttk.Label(self.timeout_frame, text="秒").pack(side=tk.LEFT, padx=(0, 15))
+        
+        ttk.Label(self.timeout_frame, text="重试超时:", width=10).pack(side=tk.LEFT, padx=5)
+        self.retry_timeout_var = tk.StringVar(value="15")
+        self.retry_timeout_entry = ttk.Entry(
+            self.timeout_frame, 
+            textvariable=self.retry_timeout_var, 
+            font=("微软雅黑", 10),
+            width=8
+        )
+        self.retry_timeout_entry.pack(side=tk.LEFT, padx=5)
+        ttk.Label(self.timeout_frame, text="秒 (推荐: 首次8秒, 重试15秒)").pack(side=tk.LEFT)
         
         def on_site_change(*args):
             site_name = self.site_var.get()
@@ -466,11 +534,13 @@ class GenericComicDownloaderGUI:
                 actual_chapters = actual_end - actual_start + 1
                 
                 self.append_status(f"总章节数: {total_chapters}, 将下载: {actual_start}-{actual_end} 共{actual_chapters}章")
+                self.append_status(f"DEBUG: chapter_start={chapter_start}, chapter_end={chapter_end}, actual_start={actual_start}, actual_end={actual_end}")
                 self.reset_url_progress(actual_chapters)
                 
                 self.append_status("正在收集章节图片链接...")
                 max_workers = int(self.thread_var.get().strip())
                 
+                self.append_status(f"DEBUG: 传给collect_chapters_images: chapter_start={actual_start}, chapter_end={actual_end}")
                 all_chapters_data = crawler.collect_chapters_images(
                     target_comic_tab, 
                     chapter_start=actual_start,
@@ -494,6 +564,14 @@ class GenericComicDownloaderGUI:
                 if all_chapters_data:
                     self.append_status("开始下载章节图片...")
                     download_thread_count = int(self.download_thread_var.get().strip())
+                    use_thread_only = self.download_mode_var.get() == "thread_only"
+                    first_timeout = int(self.first_timeout_var.get().strip())
+                    retry_timeout = int(self.retry_timeout_var.get().strip())
+                    if use_thread_only:
+                        self.append_status(f"使用纯多线程模式，线程数: {download_thread_count}")
+                    else:
+                        self.append_status(f"使用协程模式")
+                    self.append_status(f"首次超时: {first_timeout}秒, 重试超时: {retry_timeout}秒")
                     failed_downloads, failed_json_path, should_zip = asyncio.run(
                         download_all_chapters(
                             all_chapters_data,
@@ -501,7 +579,10 @@ class GenericComicDownloaderGUI:
                             download_path if download_path else None,
                             download_thread_count=download_thread_count,
                             progress_callback=self.update_progress,
-                            max_retries=3
+                            max_retries=3,
+                            use_thread_only=use_thread_only,
+                            first_timeout=first_timeout,
+                            retry_timeout=retry_timeout
                         )
                     )
 
@@ -514,9 +595,6 @@ class GenericComicDownloaderGUI:
                         self.append_status(f"\n失败列表已保存到: {failed_json_path}")
 
                     if should_zip:
-                        self.append_status("正在获取图片尺寸...")
-                        get_image_dimensions(comic_name, download_path if download_path else None)
-
                         self.append_status("正在压缩文件夹...")
                         zip_main_folder(comic_name, download_path if download_path else None)
 
@@ -568,33 +646,33 @@ class GenericComicDownloaderGUI:
                 self.reset_progress(total_images)
 
                 download_thread_count = int(self.download_thread_var.get().strip())
+                first_timeout = int(self.first_timeout_var.get().strip())
+                retry_timeout = int(self.retry_timeout_var.get().strip())
 
                 # 导入函数
                 from downloader import download_from_failed_json
 
-                still_failed, all_success, image_dimensions = asyncio.run(
+                still_failed, all_success = asyncio.run(
                     download_from_failed_json(
                         json_path,
                         concurrent_limit=3,
                         download_thread_count=download_thread_count,
                         use_thread_coroutine=True,
                         progress_callback=self.update_progress,
-                        max_retries=3
+                        max_retries=3,
+                        first_timeout=first_timeout,
+                        retry_timeout=retry_timeout
                     )
                 )
 
                 if all_success:
                     self.append_status(f"\n✓ 所有失败图片下载成功！")
-                    if image_dimensions:
-                        self.append_status(f"图片宽高信息已保存到 image_dimensions.json")
                     messagebox.showinfo("成功", "所有失败图片下载成功！")
                 else:
                     self.append_status(f"\n⚠️ 仍有 {len(still_failed)} 张图片下载失败")
                     for failed in still_failed:
                         self.append_status(f"  - 章节{failed['chapter_num']}-第{failed['image_index']}张: {failed['url']}")
                     self.append_status(f"\n更新后的失败列表已保存")
-                    if image_dimensions:
-                        self.append_status(f"成功图片的宽高信息已保存到 image_dimensions.json")
                     messagebox.showwarning("完成", f"部分图片下载成功，仍有 {len(still_failed)} 张失败。\n更新后的失败列表已保存。")
 
                 self.append_status(f"{'='*50}")

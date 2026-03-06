@@ -24,6 +24,11 @@ class ComicCrawler:
         print(f"正在初始化浏览器...")
         co = ChromiumOptions().set_paths(browser_path)
         
+        # 设置新的调试端口，避免冲突
+        import random
+        debug_port = random.randint(9223, 9322)
+        co.set_argument(f"--remote-debugging-port={debug_port}")
+        
         if headless:
             co.headless()
             co.set_argument("--disable-gpu")
@@ -33,8 +38,24 @@ class ComicCrawler:
         else:
             print("已启用有头模式")
         
-        self.page = ChromiumPage(co)
-        self.tab = self.page
+        try:
+            self.page = ChromiumPage(co)
+            self.tab = self.page
+        except Exception as e:
+            print(f"浏览器连接失败: {e}")
+            print("尝试关闭现有浏览器进程并重新启动...")
+            import os
+            import subprocess
+            # 尝试关闭占用9222端口的进程
+            try:
+                subprocess.run(['taskkill', '/F', '/IM', 'msedge.exe'], capture_output=True)
+                subprocess.run(['taskkill', '/F', '/IM', 'chrome.exe'], capture_output=True)
+                time.sleep(2)
+            except:
+                pass
+            # 重新尝试
+            self.page = ChromiumPage(co)
+            self.tab = self.page
     
     def parse_cookie_str(self, cookie_str, domain):
         """解析Cookie字符串为DrissionPage可用的格式"""
@@ -182,6 +203,8 @@ class ComicCrawler:
             chapter_eles = target_comic_tab.eles("xpath:" + chapter_list_xpath)
             return len(chapter_eles)
         elif self.site_name == '御漫画':
+            # 先点击"显示更多"按钮展开所有章节
+            click_show_more_yumanhua(self, target_comic_tab)
             chapter_elements = target_comic_tab.eles(f"xpath:{self.xpaths['chapter_list']}")
             return len(chapter_elements)
         return 0
@@ -617,7 +640,7 @@ def get_chapter_images_yumanhua(crawler, chapter_url, chapter_num=None, max_wait
             
             if max_images > 0:
                 images_found = True
-                print(f"{chapter_info}检测到 {max_images} 张图片")
+                print(f"{chapter_info}页面本身有 {max_images} 张图片")
                 break
             
             time.sleep(0.5)
@@ -631,19 +654,31 @@ def get_chapter_images_yumanhua(crawler, chapter_url, chapter_num=None, max_wait
                 print(f"{chapter_info}✗ 已达到最大重试次数({max_page_retries})，仍未检测到图片")
                 return [], True  # 返回失败标志
     
-    # 获取图片URL
-    print(f"{chapter_info}开始获取图片URL...")
+    # 获取图片URL - 一次性获取所有图片元素，避免重复查询
+    print(f"{chapter_info}开始获取图片URL，共 {max_images} 张...")
+    
+    # 先一次性获取所有图片元素
+    try:
+        all_image_divs = crawler.tab.eles(f"xpath:{crawler.xpaths['image_list']}")
+        print(f"{chapter_info}已获取到 {len(all_image_divs)} 个图片元素，开始提取URL...")
+    except Exception as e:
+        print(f"{chapter_info}✗ 获取图片元素列表失败: {e}")
+        return [], True
+    
     for i in range(1, max_images + 1):
-        image_divs_current = crawler.tab.eles(f"xpath:{crawler.xpaths['image_list']}")
-        current_max = len(image_divs_current)
-        
-        if i > current_max:
-            print(f"{chapter_info}✗ 第{i}张图片: 超过当前最大图片数 {current_max}，停止获取")
+        if i > len(all_image_divs):
+            print(f"{chapter_info}✗ 第{i}张图片: 超过元素列表长度 {len(all_image_divs)}，停止获取")
             break
         
         try:
-            img_xpath = crawler.xpaths['image_item'].replace("num", str(i))
-            img_elem = crawler.tab.ele(f"xpath:{img_xpath}")
+            img_div = all_image_divs[i-1]  # 直接使用已获取的元素
+            # 在div中查找img标签
+            img_elem = img_div.ele("tag:img")
+            if not img_elem:
+                failed_indices.append(i)
+                print(f"{chapter_info}✗ 第{i}张图片: 未找到img标签")
+                continue
+                
             img_url = img_elem.attr(crawler.image_attr)
             if not img_url:
                 img_url = img_elem.attr("src")
@@ -651,12 +686,12 @@ def get_chapter_images_yumanhua(crawler, chapter_url, chapter_num=None, max_wait
                 image_urls.append(img_url)
             else:
                 failed_indices.append(i)
-                print(f"{chapter_info}✗ 第{i}张图片: 没有找到URL (最大图片数: {current_max})")
+                print(f"{chapter_info}✗ 第{i}张图片: 没有找到URL")
         except Exception as e:
             failed_indices.append(i)
-            print(f"{chapter_info}✗ 第{i}张图片: {e} (最大图片数: {current_max})")
+            print(f"{chapter_info}✗ 第{i}张图片: {e}")
     
-    print(f"{chapter_info}获取: {len(image_urls)}/{max_images} 张图片")
+    print(f"{chapter_info}本轮获取: {len(image_urls)}/{max_images} 张图片")
     
     # 如果有失败的图片，立即刷新页面重试一次
     if failed_indices and len(image_urls) < max_images:
@@ -676,8 +711,12 @@ def get_chapter_images_yumanhua(crawler, chapter_url, chapter_num=None, max_wait
                 continue
             
             try:
-                img_xpath = crawler.xpaths['image_item'].replace("num", str(i))
-                img_elem = crawler.tab.ele(f"xpath:{img_xpath}")
+                img_div = image_divs_new[i-1]  # 直接使用已获取的元素
+                img_elem = img_div.ele("tag:img")
+                if not img_elem:
+                    print(f"{chapter_info}✗ 第{i}张图片重试失败: 未找到img标签")
+                    continue
+                    
                 img_url = img_elem.attr(crawler.image_attr)
                 if not img_url:
                     img_url = img_elem.attr("src")
@@ -694,9 +733,9 @@ def get_chapter_images_yumanhua(crawler, chapter_url, chapter_num=None, max_wait
     is_failed = len(image_urls) == 0
     
     if is_failed:
-        print(f"{chapter_info}✗ 完全失败，未获取到任何图片URL")
+        print(f"{chapter_info}✗ 完全失败，未获取到任何图片URL (页面本身有 {max_images} 张)")
     else:
-        print(f"{chapter_info}成功获取 {len(image_urls)}/{max_images} 张图片URL")
+        print(f"{chapter_info}✓ 最终成功获取 {len(image_urls)}/{max_images} 张图片URL")
     
     return image_urls, is_failed
 
@@ -714,15 +753,23 @@ def collect_chapters_images_yumanhua(self, target_comic_tab, chapter_start=1, ch
     3. 等所有章节处理完成后，对失败章节再重试3次
     """
     chapter_links = get_chapter_links_yumanhua(self, target_comic_tab)
+    total_found = len(chapter_links)
+    print(f"获取到总共 {total_found} 个章节链接")
     
     # 根据章节范围筛选
     chapter_links = [c for c in chapter_links if c['num'] >= chapter_start]
+    print(f"筛选起始章节 >= {chapter_start} 后，剩余 {len(chapter_links)} 个章节")
+    
     if chapter_end > 0:
         chapter_links = [c for c in chapter_links if c['num'] <= chapter_end]
+        print(f"筛选结束章节 <= {chapter_end} 后，剩余 {len(chapter_links)} 个章节")
+    else:
+        print(f"结束章节为0，下载到最后一章，剩余 {len(chapter_links)} 个章节")
     
     if chapter_links:
+        actual_start = chapter_links[0]['num']
         actual_end = chapter_links[-1]['num']
-        print(f"将下载第{chapter_start}-{actual_end}章，共{len(chapter_links)}章")
+        print(f"将下载第{actual_start}-{actual_end}章，共{len(chapter_links)}章")
     
     all_chapters_data = []
     failed_chapters = []  # 记录首次获取失败的章节
@@ -790,24 +837,20 @@ def collect_chapters_images_yumanhua(self, target_comic_tab, chapter_start=1, ch
         worker_tab.close()
         print(f"[工作线程{worker_id}] 已完成并关闭标签页")
     
-    # 分批创建工作线程，避免同时创建过多
-    batch_size = min(max_workers, 3)  # 每批最多3个线程
-    for batch_start in range(0, max_workers, batch_size):
-        batch_end = min(batch_start + batch_size, max_workers)
-        print(f"\n启动第 {batch_start//batch_size + 1} 批工作线程 ({batch_start+1}-{batch_end})...")
-        
-        threads = []
-        for i in range(batch_start, batch_end):
-            t = threading.Thread(target=worker_thread, args=(i,))
-            threads.append(t)
-            t.start()
-            time.sleep(0.5)  # 间隔0.5秒启动，避免同时创建标签页
-        
-        # 等待这批线程完成
-        for t in threads:
-            t.join()
-        
-        print(f"第 {batch_start//batch_size + 1} 批工作线程已完成")
+    # 同时创建所有工作线程
+    print(f"\n启动 {max_workers} 个工作线程...")
+    
+    threads = []
+    for i in range(max_workers):
+        t = threading.Thread(target=worker_thread, args=(i,))
+        threads.append(t)
+        t.start()
+    
+    # 等待所有线程完成
+    for t in threads:
+        t.join()
+    
+    print(f"所有工作线程已完成")
     
     # 对首次失败的章节进行重试
     if failed_chapters:

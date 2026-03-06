@@ -12,7 +12,6 @@ import json
 import aiofiles
 import aiohttp
 import zipfile
-from PIL import Image
 import time
 
 # ========== 配置部分 ==========
@@ -63,48 +62,6 @@ GENERAL_CONFIG = {
 def is_normal_url(url):
     """检查URL是否有效"""
     return url and ('http' in url or 'https' in url)
-
-
-def get_image_dimensions(main_folder):
-    """获取所有图片的高宽并保存到JSON文件"""
-    print("\n开始获取图片高宽信息...")
-    start_time = time.time()
-    
-    length_folder = os.path.join(main_folder, "length")
-    if not os.path.exists(length_folder):
-        os.makedirs(length_folder)
-        print(f"创建length文件夹: {length_folder}")
-    
-    all_dimensions = {}
-    
-    for chapter_name in sorted(os.listdir(main_folder), key=lambda x: int(x) if x.isdigit() else float('inf')):
-        chapter_path = os.path.join(main_folder, chapter_name)
-        
-        if os.path.isdir(chapter_path) and chapter_name != "length":
-            all_dimensions[chapter_name] = {}
-            
-            for img_file in os.listdir(chapter_path):
-                if img_file.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.bmp')):
-                    img_path = os.path.join(chapter_path, img_file)
-                    try:
-                        with Image.open(img_path) as img:
-                            width, height = img.size
-                            img_name = os.path.splitext(img_file)[0]
-                            all_dimensions[chapter_name][img_name] = {
-                                "height": height,
-                                "width": width
-                            }
-                    except Exception as e:
-                        print(f"获取图片 {img_file} 高宽失败: {e}")
-    
-    if all_dimensions:
-        json_file_path = os.path.join(length_folder, "dimensions.json")
-        with open(json_file_path, 'w', encoding='utf-8') as f:
-            json.dump(all_dimensions, f, ensure_ascii=False, indent=2)
-        print(f"保存所有图片高宽信息到 {json_file_path}")
-    
-    end_time = time.time()
-    print(f"创建JSON文件耗时: {end_time - start_time:.2f} 秒")
 
 
 def zip_main_folder(comic_name, base_path=None):
@@ -1049,12 +1006,6 @@ class ComicDownloaderGUI:
                     self.append_status("正在下载章节图片...")
                     asyncio.run(download_all_chapters(all_chapters_data, comic_name, download_path if download_path else None, self.update_progress))
                     self.append_status("章节图片下载完成")
-                
-                self.append_status("正在获取图片尺寸...")
-                base_path = download_path if download_path else os.getcwd()
-                main_folder = os.path.join(base_path, comic_name)
-                get_image_dimensions(main_folder)
-                self.append_status("图片尺寸获取完成")
                 
                 self.append_status("正在压缩文件夹...")
                 zip_main_folder(comic_name, download_path if download_path else None)

@@ -25,12 +25,13 @@ async def download_with_aiohttp(url, file_path, timeout=10):
             async with session.get(url, allow_redirects=True) as response:
                 if response.status == 200:
                     content = await response.read()
-                    if len(content) > 1024:
+                    # 只要有内容就算成功（即使是空白图片）
+                    if len(content) > 0:
                         async with aiofiles.open(file_path, 'wb') as f:
                             await f.write(content)
                         return True, len(content)
                     else:
-                        return False, f"内容过小({len(content)}字节)"
+                        return False, "内容为空"
                 else:
                     return False, f"状态码{response.status}"
     except asyncio.TimeoutError:
@@ -49,72 +50,66 @@ def download_with_requests(url, file_path, timeout=10):
             for chunk in response.iter_content(1024):
                 f.write(chunk)
         
-        if os.path.getsize(file_path) > 1024:
-            return True, os.path.getsize(file_path)
+        # 只要有内容就算成功（即使是空白图片）
+        file_size = os.path.getsize(file_path)
+        if file_size > 0:
+            return True, file_size
         else:
-            return False, "内容过小"
+            return False, "内容为空"
     except Exception as e:
         return False, str(e)[:50]
 
 
-async def download_image(url, index, folder_name, chapter_num, progress_callback=None):
+async def download_image(url, index, folder_name, chapter_num, progress_callback=None, timeout=10):
     """
     下载单张图片
-    先用aiohttp，失败再用requests
+    先用aiohttp下载，失败则返回错误信息（不立即重试）
+    
+    Args:
+        timeout: 下载超时时间（秒）
     """
     file_path = os.path.join(folder_name, f"{index}.jpg")
     
-    success, info = await download_with_aiohttp(url, file_path)
+    success, info = await download_with_aiohttp(url, file_path, timeout=timeout)
     if success:
-        print(f"  ✓ 第{index}张图片下载成功(aiohttp)")
+        print(f"  ✓ 第{index}张图片下载成功")
         if progress_callback:
             progress_callback(info)
-        return None
+        return None  # 成功，无失败信息
     
-    print(f"  → 第{index}张aiohttp失败({info})，尝试requests...")
+    # 下载失败，返回错误信息（不立即重试，最后统一处理）
+    print(f"  ✗ 第{index}张下载失败: {info}")
+    if progress_callback:
+        progress_callback(0)
     
-    loop = asyncio.get_event_loop()
-    success, info = await loop.run_in_executor(
-        None,
-        download_with_requests,
-        url,
-        file_path,
-        10
-    )
-    
-    if success:
-        print(f"  ✓ 第{index}张图片下载成功(requests)")
-        if progress_callback:
-            progress_callback(info)
-        return None
-    else:
-        print(f"  ✗ 第{index}张图片最终失败: {info}")
-        print(f"    URL: {url}")
-        if progress_callback:
-            progress_callback(0)
-        return {
-            'url': url,
-            'chapter_num': chapter_num,
-            'image_index': index,
-            'folder': folder_name,
-            'path': file_path,
-            'error': info
-        }
+    return {
+        'url': url,
+        'chapter_num': chapter_num,
+        'image_index': index,
+        'folder': folder_name,
+        'path': file_path,
+        'error': info
+    }
 
 
-async def download_batch_coroutine(images_to_download, concurrent_limit, progress_callback=None):
+async def download_batch_coroutine(images_to_download, concurrent_limit, progress_callback=None, timeout=10):
     """
     协程模式批量下载图片，控制并发数
     images_to_download: [(url, index, folder_name, chapter_num), ...]
+    
+    所有失败都收集返回，最后统一重试
+    
+    Args:
+        timeout: 下载超时时间（秒）
     """
     semaphore = asyncio.Semaphore(concurrent_limit)
     failed_list = []
 
     async def download_with_semaphore(url, index, folder_name, chapter_num):
         async with semaphore:
-            result = await download_image(url, index, folder_name, chapter_num, progress_callback)
-            if result:
-                failed_list.append(result)
+            failed_info = await download_image(url, index, folder_name, chapter_num, progress_callback, timeout=timeout)
+            if failed_info:
+                failed_list.append(failed_info)
             await asyncio.sleep(0.3)
 
     tasks = [
@@ -123,14 +118,107 @@ async def download_batch_coroutine(images_to_download, concurrent_limit, progres
     ]
 
     await asyncio.gather(*tasks)
+    
     return failed_list
 
 
-def download_batch_thread_coroutine(images_to_download, concurrent_limit, thread_count=4, progress_callback=None):
+def retry_failed_batch(failed_list, progress_callback=None, max_workers=8, timeout=15):
+    """
+    使用多线程批量重试失败的图片
+    
+    Args:
+        failed_list: 失败图片列表
+        progress_callback: 进度回调
+        max_workers: 最大线程数
+        timeout: 下载超时时间（秒）
+    """
+    def retry_single(img_info):
+        url = img_info['url']
+        file_path = img_info['path']
+        index = img_info['image_index']
+        
+        # 尝试requests下载
+        success, info = download_with_requests(url, file_path, timeout=timeout)
+        if success:
+            print(f"  ✓ 第{index}张重试成功")
+            if progress_callback:
+                progress_callback(info)
+            return None
+        else:
+            print(f"  ✗ 第{index}张重试失败: {info}")
+            if progress_callback:
+                progress_callback(0)
+            return img_info
+    
+    still_failed = []
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        results = executor.map(retry_single, failed_list)
+        for result in results:
+            if result:
+                still_failed.append(result)
+    
+    print(f"重试完成: 成功 {len(failed_list) - len(still_failed)} 张，失败 {len(still_failed)} 张")
+    return still_failed
+
+
+def download_batch_thread_only(images_to_download, thread_count=8, progress_callback=None, timeout=10):
+    """
+    纯多线程模式批量下载图片（不使用协程）
+    
+    Args:
+        images_to_download: [(url, index, folder_name, chapter_num), ...]
+        thread_count: 线程数
+        progress_callback: 进度回调函数
+        timeout: 下载超时时间（秒）
+    """
+    failed_list = []
+    
+    def download_single(args):
+        url, index, folder_name, chapter_num = args
+        file_path = os.path.join(folder_name, f"{index}.jpg")
+        
+        # 使用requests直接下载
+        success, info = download_with_requests(url, file_path, timeout=timeout)
+        
+        if success:
+            print(f"  ✓ 第{index}张下载成功")
+            if progress_callback:
+                progress_callback(info)
+            return None
+        else:
+            print(f"  ✗ 第{index}张下载失败: {info}")
+            if progress_callback:
+                progress_callback(0)
+            
+            return {
+                'url': url,
+                'chapter_num': chapter_num,
+                'image_index': index,
+                'folder': folder_name,
+                'path': file_path,
+                'error': info
+            }
+    
+    print(f"\n使用纯多线程模式下载，线程数: {thread_count}")
+    with ThreadPoolExecutor(max_workers=thread_count) as executor:
+        results = executor.map(download_single, images_to_download)
+        for result in results:
+            if result:
+                failed_list.append(result)
+    
+    return failed_list
+
+
+def download_batch_thread_coroutine(images_to_download, concurrent_limit, thread_count=4, progress_callback=None, timeout=10):
     """
     多线程+协程模式批量下载图片
     线程数控制章节级并发，协程控制图片级并发
     images_to_download: [(url, index, folder_name, chapter_num), ...]
+    
+    所有失败都收集返回，最后统一重试
+    
+    Args:
+        timeout: 下载超时时间（秒）
     """
     def process_chunk(chunk):
         """在线程中运行协程下载"""
@@ -138,7 +226,7 @@ def download_batch_thread_coroutine(images_to_download, concurrent_limit, thread
         asyncio.set_event_loop(loop)
         try:
             result = loop.run_until_complete(
-                download_batch_coroutine(chunk, concurrent_limit, progress_callback)
+                download_batch_coroutine(chunk, concurrent_limit, progress_callback, timeout=timeout)
             )
             return result
         finally:
@@ -161,11 +249,29 @@ def download_batch_thread_coroutine(images_to_download, concurrent_limit, thread
     return failed_list
 
 
-async def download_batch(images_to_download, concurrent_limit, thread_count=4, use_thread_coroutine=True, progress_callback=None):
+async def download_batch(images_to_download, concurrent_limit, thread_count=4, use_thread_coroutine=True, progress_callback=None, use_thread_only=False, timeout=10):
     """
-    批量下载图片，可选择使用纯协程或多线程+协程
+    批量下载图片，可选择使用纯协程、多线程+协程或纯多线程
+    
+    所有失败都收集返回，最后统一重试
+    
+    Args:
+        use_thread_only: 是否使用纯多线程模式（不使用协程）
+        timeout: 下载超时时间（秒）
     """
-    if use_thread_coroutine and thread_count > 1:
+    if use_thread_only:
+        # 纯多线程模式
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            download_batch_thread_only,
+            images_to_download,
+            thread_count,
+            progress_callback,
+            timeout
+        )
+    elif use_thread_coroutine and thread_count > 1:
+        # 多线程+协程模式
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
             None,
@@ -173,14 +279,22 @@ async def download_batch(images_to_download, concurrent_limit, thread_count=4, u
             images_to_download,
             concurrent_limit,
             thread_count,
-            progress_callback
+            progress_callback,
+            timeout
         )
     else:
-        return await download_batch_coroutine(images_to_download, concurrent_limit, progress_callback)
+        # 纯协程模式
+        return await download_batch_coroutine(images_to_download, concurrent_limit, progress_callback, timeout=timeout)
 
 
-async def download_chapter_images(herf_list, folder_name, chapter_num, concurrent_limit=3, thread_count=4, use_thread_coroutine=True, progress_callback=None):
-    """下载单个章节的图片"""
+async def download_chapter_images(herf_list, folder_name, chapter_num, concurrent_limit=3, thread_count=4, use_thread_coroutine=True, progress_callback=None, use_thread_only=False, timeout=10):
+    """下载单个章节的图片
+    
+    所有失败都收集返回，最后统一重试
+    
+    Args:
+        timeout: 下载超时时间（秒）
+    """
     if not os.path.exists(folder_name):
         os.makedirs(folder_name)
 
@@ -188,7 +302,7 @@ async def download_chapter_images(herf_list, folder_name, chapter_num, concurren
     start_time = time.time()
 
     images_to_download = [(url, i, folder_name, chapter_num) for i, url in enumerate(herf_list, 1)]
-    failed = await download_batch(images_to_download, concurrent_limit, thread_count, use_thread_coroutine, progress_callback)
+    failed = await download_batch(images_to_download, concurrent_limit, thread_count, use_thread_coroutine, progress_callback, use_thread_only, timeout=timeout)
 
     elapsed = time.time() - start_time
     print(f"[章节{chapter_num}] 完成，耗时{elapsed:.1f}秒，失败{len(failed)}张")
@@ -210,14 +324,15 @@ def check_missing_images(herf_list, folder_name, chapter_num):
                 'path': file_path,
                 'error': '文件不存在'
             })
-        elif os.path.getsize(file_path) < 1024:
+        elif os.path.getsize(file_path) == 0:
+            # 只检查文件是否为空，不再限制最小字节数
             missing.append({
                 'url': url,
                 'chapter_num': chapter_num,
                 'image_index': i,
                 'folder': folder_name,
                 'path': file_path,
-                'error': '文件过小(可能损坏)'
+                'error': '文件为空'
             })
     return missing
 
@@ -264,11 +379,14 @@ def save_image_urls_to_json(all_chapters_data, comic_name, base_path=None):
     return json_path
 
 
-async def download_all_chapters(all_chapters_data, comic_name, base_path=None, save_json_only=False, concurrent_limit=3, download_thread_count=4, use_thread_coroutine=True, progress_callback=None, max_retries=3):
+async def download_all_chapters(all_chapters_data, comic_name, base_path=None, save_json_only=False, concurrent_limit=3, download_thread_count=4, use_thread_coroutine=True, progress_callback=None, max_retries=3, use_thread_only=False, first_timeout=8, retry_timeout=15):
     """下载所有章节，可选只保存JSON不下载
     
     Args:
         max_retries: 失败后重试次数，默认3次
+        use_thread_only: 是否使用纯多线程模式（不使用协程）
+        first_timeout: 首次下载超时时间（秒）
+        retry_timeout: 重试超时时间（秒）
     
     Returns:
         tuple: (failed_list, failed_json_path, should_zip)
@@ -278,6 +396,7 @@ async def download_all_chapters(all_chapters_data, comic_name, base_path=None, s
     """
     print(f"\n{'='*50}")
     print(f"开始处理漫画: {comic_name}")
+    print(f"首次超时: {first_timeout}秒, 重试超时: {retry_timeout}秒")
     print(f"{'='*50}")
     
     if base_path is None:
@@ -294,7 +413,7 @@ async def download_all_chapters(all_chapters_data, comic_name, base_path=None, s
         return [], None, True
     
     total_start = time.time()
-    all_failed = []
+    all_failed = []  # 收集所有失败图片
 
     for chapter_data in all_chapters_data:
         chapter_num = chapter_data['chapter_num']
@@ -305,43 +424,28 @@ async def download_all_chapters(all_chapters_data, comic_name, base_path=None, s
             continue
         
         folder_name = os.path.join(main_folder, str(chapter_num))
-        failed = await download_chapter_images(herf_list, folder_name, chapter_num, concurrent_limit, download_thread_count, use_thread_coroutine, progress_callback)
+        # 使用协程+多线程下载，收集所有失败
+        failed = await download_chapter_images(herf_list, folder_name, chapter_num, concurrent_limit, download_thread_count, use_thread_coroutine, progress_callback, use_thread_only, timeout=first_timeout)
+        # 收集所有失败图片
         all_failed.extend(failed)
 
     total_elapsed = time.time() - total_start
     print(f"\n{'='*50}")
     print(f"首次下载完成！总耗时: {total_elapsed:.1f}秒")
-    print(f"失败: {len(all_failed)} 张")
+    print(f"失败图片: {len(all_failed)} 张")
     
-    # 重试失败图片
+    # 所有章节下载完成后，统一多线程重试所有失败图片
     if all_failed:
-        print(f"\n开始重试失败图片，共{max_retries}轮...")
-        for retry_round in range(1, max_retries + 1):
-            if not all_failed:
-                break
-            
-            print(f"\n{'='*50}")
-            print(f"第 {retry_round}/{max_retries} 轮重试")
-            print(f"{'='*50}")
-            
-            # 准备重试的图片列表
-            images_to_retry = [
-                (img['url'], img['image_index'], img['folder'], img['chapter_num'])
-                for img in all_failed
-            ]
-            
-            # 使用多线程+协程重试
-            still_failed = await download_batch(
-                images_to_retry, 
-                concurrent_limit, 
-                download_thread_count, 
-                use_thread_coroutine, 
-                progress_callback
-            )
-            
-            success_count = len(all_failed) - len(still_failed)
-            print(f"\n第 {retry_round} 轮重试完成: 成功 {success_count} 张，仍然失败 {len(still_failed)} 张")
-            all_failed = still_failed
+        print(f"\n{'='*50}")
+        print(f"开始统一重试所有失败图片: {len(all_failed)} 张")
+        print(f"{'='*50}")
+        
+        # 使用多线程批量重试
+        still_failed = retry_failed_batch(all_failed, progress_callback, max_workers=download_thread_count, timeout=retry_timeout)
+        success_count = len(all_failed) - len(still_failed)
+        print(f"\n统一重试完成: 成功 {success_count} 张，失败 {len(still_failed)} 张")
+        
+        all_failed = still_failed
     
     # 保存失败列表到JSON
     if all_failed:
@@ -374,7 +478,14 @@ def save_failed_json(failed_list, comic_name, base_path=None):
     if base_path is None:
         base_path = os.getcwd()
     
-    main_folder = os.path.join(base_path, comic_name)
+    # 如果base_path已经以comic_name结尾，则不再拼接
+    if base_path.endswith(comic_name) or base_path.endswith(comic_name + os.sep):
+        main_folder = base_path
+    else:
+        main_folder = os.path.join(base_path, comic_name)
+    
+    # 确保文件夹存在
+    os.makedirs(main_folder, exist_ok=True)
     
     failed_data = {
         "comic_name": comic_name,
@@ -391,7 +502,7 @@ def save_failed_json(failed_list, comic_name, base_path=None):
     return failed_json_path
 
 
-async def download_from_failed_json(json_path, concurrent_limit=3, download_thread_count=4, use_thread_coroutine=True, progress_callback=None, max_retries=3):
+async def download_from_failed_json(json_path, concurrent_limit=3, download_thread_count=4, use_thread_coroutine=True, progress_callback=None, max_retries=3, first_timeout=8, retry_timeout=15):
     """从失败的JSON文件重新下载图片
     
     Args:
@@ -401,15 +512,17 @@ async def download_from_failed_json(json_path, concurrent_limit=3, download_thre
         use_thread_coroutine: 是否使用多线程+协程
         progress_callback: 进度回调函数
         max_retries: 失败后重试次数
+        first_timeout: 首次下载超时时间（秒）
+        retry_timeout: 重试超时时间（秒）
     
     Returns:
-        tuple: (still_failed, all_success, image_dimensions)
+        tuple: (still_failed, all_success)
             - still_failed: 仍然失败的图片列表
             - all_success: 是否全部成功
-            - image_dimensions: 成功下载图片的宽高信息字典 {path: (width, height)}
     """
     print(f"\n{'='*50}")
     print(f"从失败列表重新下载")
+    print(f"首次超时: {first_timeout}秒, 重试超时: {retry_timeout}秒")
     print(f"{'='*50}")
     
     with open(json_path, 'r', encoding='utf-8') as f:
@@ -425,7 +538,7 @@ async def download_from_failed_json(json_path, concurrent_limit=3, download_thre
     
     if not failed_images:
         print("没有需要重试的图片")
-        return [], True, {}
+        return [], True
     
     images_to_download = [
         (img['url'], img['image_index'], img['folder'], img['chapter_num'])
@@ -433,55 +546,23 @@ async def download_from_failed_json(json_path, concurrent_limit=3, download_thre
     ]
     
     all_failed = []
-    image_dimensions = {}  # 记录图片宽高
     
-    # 首次下载
+    # 首次下载（协程+多线程）
     start_time = time.time()
-    all_failed = await download_batch(images_to_download, concurrent_limit, download_thread_count, use_thread_coroutine, progress_callback)
+    all_failed = await download_batch(images_to_download, concurrent_limit, download_thread_count, use_thread_coroutine, progress_callback, timeout=first_timeout)
     
-    # 获取成功下载图片的宽高
-    from PIL import Image
-    for img in failed_images:
-        file_path = img['path']
-        if os.path.exists(file_path) and os.path.getsize(file_path) > 1024:
-            try:
-                with Image.open(file_path) as im:
-                    image_dimensions[file_path] = (im.width, im.height)
-            except Exception as e:
-                print(f"  无法获取图片尺寸 {file_path}: {e}")
-    
-    # 重试机制
-    if all_failed and max_retries > 0:
-        print(f"\n开始重试，共{max_retries}轮...")
-        for retry_round in range(1, max_retries + 1):
-            if not all_failed:
-                break
-            
-            print(f"\n{'='*50}")
-            print(f"第 {retry_round}/{max_retries} 轮重试")
-            print(f"{'='*50}")
-            
-            images_to_retry = [
-                (img['url'], img['image_index'], img['folder'], img['chapter_num'])
-                for img in all_failed
-            ]
-            
-            still_failed = await download_batch(images_to_retry, concurrent_limit, download_thread_count, use_thread_coroutine, progress_callback)
-            
-            # 获取新成功图片的宽高
-            for img in all_failed:
-                file_path = img['path']
-                if os.path.exists(file_path) and os.path.getsize(file_path) > 1024:
-                    if file_path not in image_dimensions:
-                        try:
-                            with Image.open(file_path) as im:
-                                image_dimensions[file_path] = (im.width, im.height)
-                        except Exception as e:
-                            print(f"  无法获取图片尺寸 {file_path}: {e}")
-            
-            success_count = len(all_failed) - len(still_failed)
-            print(f"\n第 {retry_round} 轮重试完成: 成功 {success_count} 张，仍然失败 {len(still_failed)} 张")
-            all_failed = still_failed
+    # 所有失败后，统一多线程重试
+    if all_failed:
+        print(f"\n{'='*50}")
+        print(f"开始统一重试所有失败图片: {len(all_failed)} 张")
+        print(f"{'='*50}")
+        
+        # 使用多线程批量重试
+        still_failed = retry_failed_batch(all_failed, progress_callback, max_workers=download_thread_count, timeout=retry_timeout)
+        success_count = len(all_failed) - len(still_failed)
+        print(f"\n统一重试完成: 成功 {success_count} 张，失败 {len(still_failed)} 张")
+        
+        all_failed = still_failed
     
     elapsed = time.time() - start_time
     
@@ -489,6 +570,36 @@ async def download_from_failed_json(json_path, concurrent_limit=3, download_thre
     print(f"重试完成！耗时: {elapsed:.1f}秒")
     print(f"成功: {len(failed_images) - len(all_failed)} 张")
     print(f"仍然失败: {len(all_failed)} 张")
+    
+    # 核查章节图片数
+    print(f"\n{'='*50}")
+    print("核查章节图片数...")
+    print(f"{'='*50}")
+    
+    # 统计每个章节的图片数
+    chapter_stats = {}
+    for img in failed_images:
+        chapter_num = img['chapter_num']
+        if chapter_num not in chapter_stats:
+            chapter_stats[chapter_num] = {'expected': 0, 'actual': 0, 'folder': img['folder']}
+        chapter_stats[chapter_num]['expected'] += 1
+    
+    # 检查实际文件数
+    for chapter_num, stats in chapter_stats.items():
+        folder = stats['folder']
+        if os.path.exists(folder):
+            # 统计文件夹中的.jpg文件
+            actual_count = len([f for f in os.listdir(folder) if f.endswith('.jpg')])
+            stats['actual'] = actual_count
+            
+            if actual_count != stats['expected']:
+                print(f"⚠️ 章节 {chapter_num}: 期望 {stats['expected']} 张，实际 {actual_count} 张")
+            else:
+                print(f"✓ 章节 {chapter_num}: {actual_count} 张 (正确)")
+        else:
+            print(f"✗ 章节 {chapter_num}: 文件夹不存在 {folder}")
+    
+    print(f"{'='*50}")
     
     if all_failed:
         print(f"\n仍然失败的图片:")
@@ -499,58 +610,22 @@ async def download_from_failed_json(json_path, concurrent_limit=3, download_thre
         failed_json_path = save_failed_json(all_failed, comic_name, base_path)
         print(f"\n更新后的失败列表已保存到: {failed_json_path}")
         
-        # 保存图片宽高信息
-        if image_dimensions:
-            dimensions_json_path = os.path.join(base_path, "image_dimensions.json")
-            dimensions_data = {
-                "comic_name": comic_name,
-                "base_path": base_path,
-                "total_images": len(image_dimensions),
-                "dimensions": {}
-            }
-            for path, (width, height) in image_dimensions.items():
-                # 将绝对路径转换为相对路径
-                rel_path = os.path.relpath(path, base_path)
-                dimensions_data["dimensions"][rel_path] = {
-                    "width": width,
-                    "height": height,
-                    "path": path
-                }
-            with open(dimensions_json_path, 'w', encoding='utf-8') as f:
-                json.dump(dimensions_data, f, ensure_ascii=False, indent=2)
-            print(f"图片宽高信息已保存到: {dimensions_json_path}")
-        
         print(f"{'='*50}")
-        return all_failed, False, image_dimensions
+        return all_failed, False
     else:
         # 全部成功，删除失败列表文件
         if os.path.exists(json_path):
             os.remove(json_path)
             print(f"\n全部下载成功，已删除失败列表: {json_path}")
         
-        # 保存图片宽高信息
-        if image_dimensions:
-            dimensions_json_path = os.path.join(base_path, "image_dimensions.json")
-            dimensions_data = {
-                "comic_name": comic_name,
-                "base_path": base_path,
-                "total_images": len(image_dimensions),
-                "dimensions": {}
-            }
-            for path, (width, height) in image_dimensions.items():
-                # 将绝对路径转换为相对路径
-                rel_path = os.path.relpath(path, base_path)
-                dimensions_data["dimensions"][rel_path] = {
-                    "width": width,
-                    "height": height,
-                    "path": path
-                }
-            with open(dimensions_json_path, 'w', encoding='utf-8') as f:
-                json.dump(dimensions_data, f, ensure_ascii=False, indent=2)
-            print(f"图片宽高信息已保存到: {dimensions_json_path}")
+        # 删除图片URL的JSON文件
+        image_urls_json = os.path.join(base_path, "image_urls.json")
+        if os.path.exists(image_urls_json):
+            os.remove(image_urls_json)
+            print(f"已删除图片URL文件: {image_urls_json}")
     
     print(f"{'='*50}")
-    return [], True, image_dimensions
+    return [], True
 
 
 async def download_cover_image(url, comic_name, base_path=None):

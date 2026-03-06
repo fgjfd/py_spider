@@ -4,7 +4,7 @@ import os
 import asyncio
 from crawler import ComicCrawler
 from downloader import download_cover_image, download_all_chapters
-from utils import get_image_dimensions, zip_main_folder
+from utils import zip_main_folder
 from config import SITES, DEFAULT_SITE, BROWSER_PATHS
 
 
@@ -100,9 +100,6 @@ def main():
                 for failed in failed_downloads:
                     print(f"  - 文件: {failed['path']}")
                     print(f"    URL: {failed['url']}")
-            
-            print("\n正在获取图片尺寸...")
-            get_image_dimensions(comic_name if not download_path else os.path.join(download_path, comic_name))
             
             print("\n正在压缩文件夹...")
             zip_main_folder(comic_name, download_path)
