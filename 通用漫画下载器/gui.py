@@ -122,18 +122,18 @@ class GenericComicDownloaderGUI:
         )
         self.cookie_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
         
-        self.yumanhua_thread_frame = ttk.Frame(self.main_frame)
+        self.thread_frame = ttk.Frame(self.main_frame)
         
-        ttk.Label(self.yumanhua_thread_frame, text="御漫画线程数:", width=12).pack(side=tk.LEFT, padx=5)
+        ttk.Label(self.thread_frame, text="章节收集线程数:", width=14).pack(side=tk.LEFT, padx=5)
         self.thread_var = tk.StringVar(value="10")
         self.thread_entry = ttk.Entry(
-            self.yumanhua_thread_frame, 
+            self.thread_frame, 
             textvariable=self.thread_var, 
             font=("微软雅黑", 10),
             width=10
         )
         self.thread_entry.pack(side=tk.LEFT, padx=5)
-        ttk.Label(self.yumanhua_thread_frame, text="(章节收集)").pack(side=tk.LEFT)
+        ttk.Label(self.thread_frame, text="(拷贝漫画)").pack(side=tk.LEFT)
         
         self.download_thread_frame = ttk.Frame(self.main_frame)
         self.download_thread_frame.pack(fill=tk.X, pady=5)
@@ -193,13 +193,13 @@ class GenericComicDownloaderGUI:
             site_name = self.site_var.get()
             if site_name == "快看":
                 self.cookie_frame.pack(fill=tk.X, pady=5, after=self.num_frame)
-                self.yumanhua_thread_frame.pack_forget()
-            elif site_name == "御漫画":
+                self.thread_frame.pack_forget()
+            elif site_name == "拷贝漫画":
                 self.cookie_frame.pack_forget()
-                self.yumanhua_thread_frame.pack(fill=tk.X, pady=5, after=self.num_frame)
+                self.thread_frame.pack(fill=tk.X, pady=5, after=self.num_frame)
             else:
                 self.cookie_frame.pack_forget()
-                self.yumanhua_thread_frame.pack_forget()
+                self.thread_frame.pack_forget()
         
         self.site_var.trace("w", on_site_change)
         on_site_change()

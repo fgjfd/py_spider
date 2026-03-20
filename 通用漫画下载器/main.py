@@ -39,7 +39,7 @@ def main():
     try:
         comic_num = int(input("请输入要下载的章节数(0表示全部): ").strip() or "0")
     except ValueError:
-        print("章节数必须是数字")
+        print("章节数必须4是数字")
         return
     
     print("\n浏览器类型:")
@@ -74,7 +74,7 @@ def main():
         print("正在收集章节图片链接...")
         if comic_num == 0:
             comic_num = 999999
-        all_chapters_data = crawler.collect_chapters_images(target_comic_tab, comic_num)
+        all_chapters_data = crawler.collect_chapters_images(target_comic_tab, chapter_end=comic_num)
         
         print(f"将下载 {len(all_chapters_data)} 个章节")
         

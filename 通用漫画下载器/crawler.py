@@ -121,8 +121,8 @@ class ComicCrawler:
             return self.search_comic_kuaikan(comic_name)
         elif self.site_name == '好多漫':
             return self.search_comic_haoduoman(comic_name)
-        elif self.site_name == '御漫画':
-            return self.search_comic_yumanhua(comic_name)
+        elif self.site_name == '拷贝漫画':
+            return self.search_comic_mangacopy(comic_name)
     
     def search_comic_kuaikan(self, comic_name):
         """快看搜索逻辑 - 完全照抄快看文件夹"""
@@ -156,36 +156,54 @@ class ComicCrawler:
         
         return target_comic_tab
     
-    def search_comic_yumanhua(self, comic_name):
-        """御漫画搜索逻辑 - 完全照抄御漫画文件夹"""
-        self.tab.get(self.site_config['site_url'])
-        
+    def search_comic_mangacopy(self, comic_name):
+        """拷贝漫画搜索逻辑 - 直接访问搜索URL"""
+        # 直接访问搜索URL
+        search_url = f"https://www.mangacopy.com/search?q={comic_name}&q_type="
         print(f"正在搜索漫画: {comic_name}")
+        print(f"搜索URL: {search_url}")
         
-        search_button = self.tab.ele(f"xpath:{self.xpaths['search_button']}")
-        search_button.click()
-        time.sleep(0.5)
+        self.tab.get(search_url)
+        time.sleep(2)
         
-        search_input = self.tab.ele(f"xpath:{self.xpaths['search_input']}")
-        search_input.input(comic_name)
-        time.sleep(0.3)
+        print(f"开始查找搜索结果...")
+        print(f"使用的XPath: {self.xpaths['search_result']}")
         
-        search_submit = self.tab.ele(f"xpath:{self.xpaths['search_submit']}")
-        search_submit.click()
-        time.sleep(1)
+        max_wait_time = 15
+        start_time = time.time()
         
-        result = self.tab.ele(f"xpath:{self.xpaths['search_result']}")
-        result.click()
-        time.sleep(1)
+        while time.time() - start_time < max_wait_time:
+            try:
+                result = self.tab.ele(f"xpath:{self.xpaths['search_result']}", timeout=0)
+                if result:
+                    print(f"找到搜索结果元素")
+                    href = result.attr('href')
+                    print(f"搜索结果链接: {href}")
+                    if href:
+                        print(f"正在打开漫画详情页: {href}")
+                        target_comic_tab = self.page.new_tab(href)
+                        print("已打开漫画详情页")
+                        return target_comic_tab
+                    else:
+                        print("搜索结果元素没有href属性")
+                else:
+                    print("未找到搜索结果元素")
+            except Exception as e:
+                print(f"查找搜索结果时出错: {e}")
+            
+            print(f"等待搜索结果... ({int(time.time() - start_time)}s/{max_wait_time}s)")
+            time.sleep(1)
         
-        print("已打开漫画详情页")
-        return self.tab
+        print(f"超时！当前页面URL: {self.tab.url}")
+        print(f"当前页面标题: {self.tab.title}")
+        
+        raise Exception(f"搜索漫画 '{comic_name}' 超时，未找到搜索结果")
     
     def get_cover_image(self, target_comic_tab):
         """获取封面图片"""
         try:
             coverimg_xpath = "xpath:" + self.xpaths['cover_image']
-            coverimg_url = target_comic_tab.ele(coverimg_xpath).attr("src")
+            coverimg_url = target_comic_tab.ele(coverimg_xpath).attr(self.image_attr)
             print(f"封面图片URL: {coverimg_url}")
             return coverimg_url
         except Exception as e:
@@ -202,11 +220,10 @@ class ComicCrawler:
             chapter_list_xpath = self.xpaths['chapter_list']
             chapter_eles = target_comic_tab.eles("xpath:" + chapter_list_xpath)
             return len(chapter_eles)
-        elif self.site_name == '御漫画':
-            # 先点击"显示更多"按钮展开所有章节
-            click_show_more_yumanhua(self, target_comic_tab)
-            chapter_elements = target_comic_tab.eles(f"xpath:{self.xpaths['chapter_list']}")
-            return len(chapter_elements)
+        elif self.site_name == '拷贝漫画':
+            chapter_list_xpath = self.xpaths['chapter_list']
+            chapter_eles = target_comic_tab.eles("xpath:" + chapter_list_xpath)
+            return len(chapter_eles)
         return 0
     
     def collect_chapters_images(self, target_comic_tab, chapter_start=1, chapter_end=0, max_workers=10, progress_callback=None):
@@ -217,11 +234,11 @@ class ComicCrawler:
             chapter_end: 结束章节号（0表示到最后一章）
         """
         if self.site_name == '快看':
-            return collect_chapters_images_kuaikan(self, target_comic_tab, chapter_start, chapter_end, progress_callback)
+            return collect_chapters_images_kuaikan(self, target_comic_tab, chapter_start, chapter_end, max_workers, progress_callback)
         elif self.site_name == '好多漫':
-            return collect_chapters_images_haoduoman(self, target_comic_tab, chapter_start, chapter_end, progress_callback)
-        elif self.site_name == '御漫画':
-            return collect_chapters_images_yumanhua(self, target_comic_tab, chapter_start, chapter_end, max_workers, progress_callback)
+            return collect_chapters_images_haoduoman(self, target_comic_tab, chapter_start, chapter_end, max_workers, progress_callback)
+        elif self.site_name == '拷贝漫画':
+            return collect_chapters_images_mangacopy(self, target_comic_tab, chapter_start, chapter_end, max_workers, progress_callback)
 
 
 # ========== 快看完整逻辑 - 完全照抄 ==========
@@ -401,6 +418,218 @@ def collect_chapters_images_kuaikan(self, target_comic_tab, chapter_start=1, cha
     return all_chapters_data
 
 
+# ========== 拷贝漫画完整逻辑 ==========
+
+def get_chapter_image_urls_mangacopy(chapter_tab, max_img_num, xpaths, image_attr):
+    """拷贝漫画获取单个章节图片URL - 先滚动到底部再获取"""
+    herf_list = []
+    
+    try:
+        # 1. 获取页面显示的最大图片数（从文本中获取）
+        try:
+            max_img_text = chapter_tab.ele("xpath:/html/body/div[1]/span[2]", timeout=3).text
+            expected_img_num = int(max_img_text.strip())
+            print(f"页面显示最大图片数: {expected_img_num}")
+        except Exception as e:
+            print(f"无法获取最大图片数，使用传入值: {max_img_num}")
+            expected_img_num = max_img_num
+        
+        # 2. 模拟鼠标滚动触发懒加载，直到图片数正常
+        print("开始模拟鼠标滚动触发懒加载...")
+        scroll_step = 300  # 每次滚动的像素
+        max_scrolls = expected_img_num * 2  # 最大滚动次数
+        scroll_count = 0
+        
+        while scroll_count < max_scrolls:
+            # 每次重新获取DOM检测当前图片数
+            img_elements = chapter_tab.eles("xpath:" + xpaths['chapter_image_parent'])
+            actual_img_num = len(img_elements)
+            
+            print(f"当前已加载{actual_img_num}张图片，目标{expected_img_num}张，已滚动{scroll_count}次")
+            
+            # 如果图片数达到目标，停止滑动
+            if actual_img_num >= expected_img_num:
+                print(f"✓ 已加载所有图片 ({actual_img_num}/{expected_img_num})")
+                break
+            
+            # 模拟鼠标向下滚动
+            chapter_tab.scroll.down(scroll_step)
+            time.sleep(0.5)  # 等待页面加载
+            scroll_count += 1
+        
+        # 3. 最终获取图片数量
+        img_elements = chapter_tab.eles("xpath:" + xpaths['chapter_image_parent'])
+        actual_img_num = len(img_elements)
+        
+        print(f"最终检测到{actual_img_num}张图片")
+        
+        if actual_img_num < expected_img_num:
+            print(f"⚠️ 实际图片数({actual_img_num})少于预期({expected_img_num})")
+            # 保存网页HTML用于调试
+            try:
+                html_content = chapter_tab.html
+                debug_file = f"chapter_{expected_img_num}_debug.html"
+                with open(debug_file, 'w', encoding='utf-8') as f:
+                    f.write(html_content)
+                print(f"已保存网页HTML到: {debug_file}")
+            except Exception as e:
+                print(f"保存HTML失败: {e}")
+        
+        # 4. 遍历图片获取URL，使用 /html/body/div[2]/div/ul/li[num]/img
+        print(f"开始获取图片URL，共{actual_img_num}张...")
+        for num in range(1, actual_img_num + 1):
+            try:
+                img_xpath = f"/html/body/div[2]/div/ul/li[{num}]/img"
+                img_ele = chapter_tab.ele(f"xpath:{img_xpath}", timeout=3)
+                herf = img_ele.attr('data-src')
+                
+                if is_normal_url(herf):
+                    print(f"第{num}张图片: {herf}")
+                    herf_list.append(herf)
+                else:
+                    print(f"第{num}张图片URL无效: {herf}")
+                    
+            except Exception as e:
+                print(f"获取第{num}张图片时出错: {e}")
+    
+    except Exception as e:
+        print(f"获取图片列表时出错: {e}")
+    
+    return herf_list
+
+
+def collect_chapter_images_mangacopy(chapter_info, xpaths, image_attr, max_wait_time=3):
+    """拷贝漫画收集单个章节
+    
+    Args:
+        max_wait_time: 最大等待时间（秒），如果超过此时间未获取到图片则重新加载页面
+    """
+    chapter_num = chapter_info['chapter_num']
+    chapter_url = chapter_info['url']
+    main_tab = chapter_info['main_tab']
+    
+    print(f"正在处理章节{chapter_num}: {chapter_url}")
+    
+    try:
+        chapter_tab = main_tab.new_tab(chapter_url)
+        time.sleep(2)
+        
+        start_time = time.time()
+        retry_count = 0
+        max_retries = 3
+        max_img_num = 0
+        
+        while retry_count <= max_retries:
+            img_elements = chapter_tab.eles("xpath:" + xpaths['chapter_image_parent'])
+            max_img_num = len(img_elements)
+            
+            if max_img_num > 0:
+                print(f"章节{chapter_num}检测到{max_img_num}张图片")
+                break
+            
+            elapsed = time.time() - start_time
+            if elapsed >= max_wait_time:
+                if retry_count < max_retries:
+                    retry_count += 1
+                    print(f"章节{chapter_num} ⚠️ {max_wait_time}秒内未检测到图片，第{retry_count}次重新加载页面...")
+                    chapter_tab.get(chapter_url)
+                    time.sleep(1)
+                    start_time = time.time()
+                else:
+                    print(f"章节{chapter_num} ✗ 已达到最大重试次数({max_retries})，仍未检测到图片")
+                    chapter_tab.close()
+                    return {
+                        'chapter_num': chapter_num,
+                        'herf_list': []
+                    }
+            else:
+                time.sleep(0.5)
+        
+        herf_list = get_chapter_image_urls_mangacopy(chapter_tab, max_img_num, xpaths, image_attr)
+        
+        chapter_tab.close()
+        
+    except Exception as e:
+        print(f"处理章节{chapter_num}时出错: {e}")
+        herf_list = []
+    
+    return {
+        'chapter_num': chapter_num,
+        'herf_list': herf_list
+    }
+
+
+def collect_chapters_images_mangacopy(self, target_comic_tab, chapter_start=1, chapter_end=0, max_threads=3, progress_callback=None):
+    """拷贝漫画完整章节收集逻辑"""
+    print(f"设置最大同时收集线程数: {max_threads}")
+    
+    chapter_list_xpath = self.xpaths['chapter_list']
+    chapter_eles = target_comic_tab.eles("xpath:" + chapter_list_xpath)
+    all_chapters_num = len(chapter_eles)
+    print(f"总章节数: {all_chapters_num}")
+    
+    chapter_urls = []
+    for i, chapter_ele in enumerate(chapter_eles, 1):
+        href = chapter_ele.attr('href')
+        chapter_urls.append(href)
+        print(f"章节{i}: {href}")
+    
+    if not chapter_urls:
+        print("未找到任何章节链接")
+        return []
+    
+    actual_start = max(chapter_start, 1)
+    actual_end = min(chapter_end, all_chapters_num) if chapter_end > 0 else all_chapters_num
+    
+    if actual_start > all_chapters_num:
+        print(f"起始章节 {actual_start} 超过总章节数 {all_chapters_num}")
+        return []
+    
+    print(f"将下载第 {actual_start}-{actual_end} 章，共 {actual_end - actual_start + 1} 章")
+    
+    all_chapters_data = []
+    current_chapter = actual_start
+    
+    while current_chapter <= actual_end:
+        group_end = min(current_chapter + max_threads - 1, actual_end)
+        print(f"\n处理章节范围: {current_chapter}-{group_end}")
+        
+        batch_chapters_info = []
+        for num in range(current_chapter, group_end + 1):
+            chapter_url = chapter_urls[num - 1]
+            
+            batch_chapters_info.append({
+                'chapter_num': num,
+                'url': chapter_url,
+                'main_tab': self.tab
+            })
+            
+            print(f"准备处理第{num}章节: {chapter_url}")
+        
+        threads = []
+        results = []
+        
+        def thread_wrapper(chapter_info):
+            result = collect_chapter_images_mangacopy(chapter_info, self.xpaths, self.image_attr)
+            results.append(result)
+        
+        for chapter_info in batch_chapters_info:
+            thread = threading.Thread(target=thread_wrapper, args=(chapter_info,))
+            threads.append(thread)
+            thread.start()
+        
+        for thread in threads:
+            thread.join()
+        
+        all_chapters_data.extend(results)
+        for _ in results:
+            if progress_callback:
+                progress_callback()
+        current_chapter = group_end + 1
+    
+    return all_chapters_data
+
+
 # ========== 好多漫完整逻辑 - 完全照抄 ==========
 
 def get_chapter_image_urls_haoduoman(chapter_tab, max_img_num, xpaths, image_attr):
@@ -551,364 +780,5 @@ def collect_chapters_images_haoduoman(self, target_comic_tab, chapter_start=1, c
             if progress_callback:
                 progress_callback()
         current_chapter = group_end + 1
-    
-    return all_chapters_data
-
-
-# ========== 御漫画完整逻辑 - 完全照抄 ==========
-
-def click_show_more_yumanhua(crawler, target_comic_tab):
-    """御漫画点击显示更多按钮 - 完全照抄"""
-    try:
-        show_more = target_comic_tab.ele(f"xpath:{crawler.xpaths['show_more_button']}")
-        if show_more:
-            print("找到'显示更多'按钮，准备点击...")
-            show_more.scroll.to_see()
-            time.sleep(0.3)
-            show_more.click()
-            print("✓ 已点击显示更多按钮")
-            time.sleep(2)
-            return True
-        else:
-            print("未找到'显示更多'按钮")
-    except Exception as e:
-        print(f"点击'显示更多'按钮失败: {e}")
-    return False
-
-
-def get_chapter_links_yumanhua(crawler, target_comic_tab):
-    """御漫画获取章节链接 - 完全照抄"""
-    print("正在获取章节列表...")
-    
-    click_show_more_yumanhua(crawler, target_comic_tab)
-    
-    chapter_elements = target_comic_tab.eles(f"xpath:{crawler.xpaths['chapter_list']}")
-    total_chapters = len(chapter_elements)
-    print(f"找到 {total_chapters} 个章节")
-    
-    chapter_links = []
-    for i, chapter in enumerate(chapter_elements, 1):
-        try:
-            link_elem = chapter.ele(f"xpath:{crawler.xpaths['chapter_link']}")
-            href = link_elem.attr("href")
-            chapter_num = total_chapters - i + 1
-            chapter_links.append({
-                'num': chapter_num,
-                'url': href
-            })
-        except Exception as e:
-            print(f"获取第{i}个章节链接失败: {e}")
-    
-    chapter_links.sort(key=lambda x: x['num'])
-    
-    print(f"成功获取 {len(chapter_links)} 个章节链接")
-    return chapter_links
-
-
-def get_chapter_images_yumanhua(crawler, chapter_url, chapter_num=None, max_wait_time=3, max_page_retries=3):
-    """御漫画获取单个章节图片
-    
-    Args:
-        max_wait_time: 最大等待时间（秒），如果超过此时间未获取到图片则重新加载页面
-        max_page_retries: 页面加载失败后的最大重试次数
-    
-    Returns:
-        tuple: (image_urls, is_failed)
-            - image_urls: 获取到的图片URL列表
-            - is_failed: 是否获取失败（True表示完全失败，需要后续重试）
-    """
-    chapter_info = f"第 {chapter_num} 章" if chapter_num else ""
-    print(f"正在获取{chapter_info}章节图片: {chapter_url}")
-    
-    # 尝试获取图片，如果3秒内未获取到则重新加载页面
-    image_urls = []
-    failed_indices = []
-    max_images = 0
-    
-    for page_retry in range(max_page_retries + 1):
-        # 加载页面
-        crawler.tab.get(chapter_url)
-        time.sleep(1)
-        
-        # 检查是否在max_wait_time秒内获取到图片
-        start_time = time.time()
-        images_found = False
-        
-        while time.time() - start_time < max_wait_time:
-            image_divs = crawler.tab.eles(f"xpath:{crawler.xpaths['image_list']}")
-            max_images = len(image_divs)
-            
-            if max_images > 0:
-                images_found = True
-                print(f"{chapter_info}页面本身有 {max_images} 张图片")
-                break
-            
-            time.sleep(0.5)
-        
-        if images_found:
-            break
-        else:
-            if page_retry < max_page_retries:
-                print(f"{chapter_info}⚠️ {max_wait_time}秒内未检测到图片，第{page_retry + 1}次重新加载页面...")
-            else:
-                print(f"{chapter_info}✗ 已达到最大重试次数({max_page_retries})，仍未检测到图片")
-                return [], True  # 返回失败标志
-    
-    # 获取图片URL - 一次性获取所有图片元素，避免重复查询
-    print(f"{chapter_info}开始获取图片URL，共 {max_images} 张...")
-    
-    # 先一次性获取所有图片元素
-    try:
-        all_image_divs = crawler.tab.eles(f"xpath:{crawler.xpaths['image_list']}")
-        print(f"{chapter_info}已获取到 {len(all_image_divs)} 个图片元素，开始提取URL...")
-    except Exception as e:
-        print(f"{chapter_info}✗ 获取图片元素列表失败: {e}")
-        return [], True
-    
-    for i in range(1, max_images + 1):
-        if i > len(all_image_divs):
-            print(f"{chapter_info}✗ 第{i}张图片: 超过元素列表长度 {len(all_image_divs)}，停止获取")
-            break
-        
-        try:
-            img_div = all_image_divs[i-1]  # 直接使用已获取的元素
-            # 在div中查找img标签
-            img_elem = img_div.ele("tag:img")
-            if not img_elem:
-                failed_indices.append(i)
-                print(f"{chapter_info}✗ 第{i}张图片: 未找到img标签")
-                continue
-                
-            img_url = img_elem.attr(crawler.image_attr)
-            if not img_url:
-                img_url = img_elem.attr("src")
-            if img_url:
-                image_urls.append(img_url)
-            else:
-                failed_indices.append(i)
-                print(f"{chapter_info}✗ 第{i}张图片: 没有找到URL")
-        except Exception as e:
-            failed_indices.append(i)
-            print(f"{chapter_info}✗ 第{i}张图片: {e}")
-    
-    print(f"{chapter_info}本轮获取: {len(image_urls)}/{max_images} 张图片")
-    
-    # 如果有失败的图片，立即刷新页面重试一次
-    if failed_indices and len(image_urls) < max_images:
-        print(f"\n{chapter_info}有 {len(failed_indices)} 张图片获取失败，准备刷新页面重试...")
-        
-        crawler.tab.refresh()
-        time.sleep(2)
-        print(f"{chapter_info}页面已刷新，开始重试...")
-        
-        image_divs_new = crawler.tab.eles(f"xpath:{crawler.xpaths['image_list']}")
-        max_images_new = len(image_divs_new)
-        print(f"{chapter_info}刷新后检测到 {max_images_new} 张图片")
-        
-        for i in failed_indices[:]:
-            if i > max_images_new:
-                print(f"{chapter_info}✗ 第{i}张图片: 超过刷新后的最大图片数 {max_images_new}，跳过")
-                continue
-            
-            try:
-                img_div = image_divs_new[i-1]  # 直接使用已获取的元素
-                img_elem = img_div.ele("tag:img")
-                if not img_elem:
-                    print(f"{chapter_info}✗ 第{i}张图片重试失败: 未找到img标签")
-                    continue
-                    
-                img_url = img_elem.attr(crawler.image_attr)
-                if not img_url:
-                    img_url = img_elem.attr("src")
-                if img_url:
-                    image_urls.append(img_url)
-                    failed_indices.remove(i)
-                    print(f"{chapter_info}✓ 第{i}张图片重试成功")
-                else:
-                    print(f"{chapter_info}✗ 第{i}张图片重试失败: 没有找到URL")
-            except Exception as e:
-                print(f"{chapter_info}✗ 第{i}张图片重试失败: {e}")
-    
-    # 判断是否完全失败（一张图片都没获取到）
-    is_failed = len(image_urls) == 0
-    
-    if is_failed:
-        print(f"{chapter_info}✗ 完全失败，未获取到任何图片URL (页面本身有 {max_images} 张)")
-    else:
-        print(f"{chapter_info}✓ 最终成功获取 {len(image_urls)}/{max_images} 张图片URL")
-    
-    return image_urls, is_failed
-
-
-def collect_chapters_images_yumanhua(self, target_comic_tab, chapter_start=1, chapter_end=0, max_workers=10, progress_callback=None):
-    """御漫画完整章节收集逻辑
-    
-    Args:
-        chapter_start: 起始章节号（从1开始）
-        chapter_end: 结束章节号（0表示到最后一章）
-    
-    流程：
-    1. 首次获取所有章节，3秒内未获取到URL的章节重新访问重试3次
-    2. 记录完全失败的章节
-    3. 等所有章节处理完成后，对失败章节再重试3次
-    """
-    chapter_links = get_chapter_links_yumanhua(self, target_comic_tab)
-    total_found = len(chapter_links)
-    print(f"获取到总共 {total_found} 个章节链接")
-    
-    # 根据章节范围筛选
-    chapter_links = [c for c in chapter_links if c['num'] >= chapter_start]
-    print(f"筛选起始章节 >= {chapter_start} 后，剩余 {len(chapter_links)} 个章节")
-    
-    if chapter_end > 0:
-        chapter_links = [c for c in chapter_links if c['num'] <= chapter_end]
-        print(f"筛选结束章节 <= {chapter_end} 后，剩余 {len(chapter_links)} 个章节")
-    else:
-        print(f"结束章节为0，下载到最后一章，剩余 {len(chapter_links)} 个章节")
-    
-    if chapter_links:
-        actual_start = chapter_links[0]['num']
-        actual_end = chapter_links[-1]['num']
-        print(f"将下载第{actual_start}-{actual_end}章，共{len(chapter_links)}章")
-    
-    all_chapters_data = []
-    failed_chapters = []  # 记录首次获取失败的章节
-    total_chapters = len(chapter_links)
-    
-    # 使用队列来控制并发
-    from queue import Queue
-    import threading
-    
-    chapter_queue = Queue()
-    for chapter_info in chapter_links:
-        chapter_queue.put(chapter_info)
-    
-    results_lock = threading.Lock()
-    
-    # ========== 单浏览器多标签页模式 ==========
-    print(f"\n使用单浏览器多标签页模式，最大并发 {max_workers} 个章节")
-    
-    def worker_thread(worker_id):
-        """工作线程 - 每个线程有自己的标签页"""
-        # 为每个工作线程创建一个独立的标签页
-        worker_tab = self.tab.new_tab()
-        
-        worker_crawler = ComicCrawler(self.site_name, None, False)
-        worker_crawler.tab = worker_tab
-        worker_crawler.xpaths = self.xpaths
-        worker_crawler.image_attr = self.image_attr
-        
-        print(f"[工作线程{worker_id}] 已创建标签页，开始处理章节...")
-        
-        while True:
-            try:
-                chapter_info = chapter_queue.get(block=False)
-            except:
-                break
-            
-            chapter_num = chapter_info['num']
-            chapter_url = chapter_info['url']
-            
-            print(f"[工作线程{worker_id}] 正在处理第 {chapter_num} 章...")
-            
-            try:
-                image_urls, is_failed = get_chapter_images_yumanhua(worker_crawler, chapter_url, chapter_num)
-                
-                with results_lock:
-                    if is_failed:
-                        print(f"[工作线程{worker_id}] 第 {chapter_num} 章首次获取完全失败，将后续重试")
-                        failed_chapters.append(chapter_info)
-                    elif image_urls:
-                        all_chapters_data.append({
-                            'chapter_num': chapter_num,
-                            'herf_list': image_urls
-                        })
-                        print(f"[工作线程{worker_id}] 第 {chapter_num} 章: {len(image_urls)} 张图片")
-                        if progress_callback:
-                            progress_callback()
-            except Exception as e:
-                print(f"[工作线程{worker_id}] 处理第 {chapter_num} 章时出错: {e}")
-                with results_lock:
-                    failed_chapters.append(chapter_info)
-            finally:
-                chapter_queue.task_done()
-        
-        # 关闭工作线程的标签页
-        worker_tab.close()
-        print(f"[工作线程{worker_id}] 已完成并关闭标签页")
-    
-    # 同时创建所有工作线程
-    print(f"\n启动 {max_workers} 个工作线程...")
-    
-    threads = []
-    for i in range(max_workers):
-        t = threading.Thread(target=worker_thread, args=(i,))
-        threads.append(t)
-        t.start()
-    
-    # 等待所有线程完成
-    for t in threads:
-        t.join()
-    
-    print(f"所有工作线程已完成")
-    
-    # 对首次失败的章节进行重试
-    if failed_chapters:
-        print(f"\n{'='*50}")
-        print(f"首次获取完成，共有 {len(failed_chapters)} 个章节需要重试")
-        print(f"{'='*50}")
-        
-        for retry_round in range(1, 4):  # 重试3次
-            if not failed_chapters:
-                break
-            
-            print(f"\n{'='*50}")
-            print(f"第 {retry_round}/3 轮重试失败章节")
-            print(f"{'='*50}")
-            
-            still_failed = []
-            
-            for chapter_info in failed_chapters:
-                chapter_num = chapter_info['num']
-                chapter_url = chapter_info['url']
-                
-                print(f"\n重试第 {chapter_num} 章...")
-                
-                try:
-                    image_urls, is_failed = get_chapter_images_yumanhua(self, chapter_url, chapter_num)
-                    
-                    if is_failed:
-                        print(f"第 {chapter_num} 章第{retry_round}轮重试仍然失败")
-                        still_failed.append(chapter_info)
-                    elif image_urls:
-                        all_chapters_data.append({
-                            'chapter_num': chapter_num,
-                            'herf_list': image_urls
-                        })
-                        print(f"第 {chapter_num} 章重试成功: {len(image_urls)} 张图片")
-                        if progress_callback:
-                            progress_callback()
-                except Exception as e:
-                    print(f"重试第 {chapter_num} 章时出错: {e}")
-                    still_failed.append(chapter_info)
-            
-            failed_chapters = still_failed
-            print(f"\n第 {retry_round} 轮重试完成，仍有 {len(failed_chapters)} 个章节失败")
-        
-        # 最终失败的章节
-        if failed_chapters:
-            print(f"\n{'='*50}")
-            print(f"⚠️ 以下章节经过3轮重试后仍然失败:")
-            for chapter_info in failed_chapters:
-                print(f"  - 第 {chapter_info['num']} 章: {chapter_info['url']}")
-            print(f"{'='*50}")
-    
-    all_chapters_data.sort(key=lambda x: x['chapter_num'])
-    
-    print(f"\n{'='*50}")
-    print(f"章节收集完成: 成功 {len(all_chapters_data)}/{total_chapters} 个章节")
-    if failed_chapters:
-        print(f"失败: {len(failed_chapters)} 个章节")
-    print(f"{'='*50}")
     
     return all_chapters_data

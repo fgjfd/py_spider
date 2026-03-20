@@ -5,26 +5,9 @@ BROWSER_PATHS = {
     'chrome': r"C:\Program Files\Google\Chrome\Application\chrome.exe"
 }
 
-DEFAULT_SITE = '御漫画'
+DEFAULT_SITE = '拷贝漫画'
 
 SITES = {
-    '御漫画': {
-        'site_url': 'http://m.yumanhua.com/',
-        'xpaths': {
-            'search_button': '/html/body/header/div/div[2]/img[1]',
-            'search_input': '/html/body/div[3]/div[6]/div[1]/div/div[1]/div/input',
-            'search_submit': '/html/body/div[3]/div[6]/div[1]/div/div[1]/button',
-            'search_result': '/html/body/div[3]/div[6]/div[1]/div/div[2]/div/ul/li/a/div[1]/img',
-            'cover_image': '/html/body/div[2]/div[1]/div/div[1]/div/img',
-            'show_more_button': '/html/body/div[2]/div[3]/div[2]/div/button',
-            'chapter_list': '/html/body/div[2]/div[3]/div[2]/ul/li',
-            'chapter_link': './a',
-            'image_list': '/html/body/div[2]/div[2]/div',
-            'image_item': '/html/body/div[2]/div[2]/div[num]/img'
-        },
-        'image_attr': 'data-src',
-        'chapter_group_size': None
-    },
     '快看': {
         'site_url': 'https://www.kuaikanmanhua.com/',
         'xpaths': {
@@ -53,6 +36,21 @@ SITES = {
             'chapter_image_data_original': '/html/body/main/div[1]/div/div[1]/div[num]'
         },
         'image_attr': 'data-original',
+        'chapter_group_size': None
+    },
+    '拷贝漫画': {
+        'site_url': 'https://www.mangacopy.com/comics',
+        'xpaths': {
+            'search_input': '/html/body/header/div/div/div[8]/div/div/div/div/input',
+            'search_button': '/html/body/header/div/div/div[8]/div/div/div/div/div',
+            'search_result': '/html/body/main/div[2]/div/div/div[1]/div[1]/div[1]/a',
+            'cover_image': '/html/body/main/div[1]/div/div[1]/div/img',
+            'chapter_list': '/html/body/main/div[2]/div[3]/div/div[2]/div/div[1]/ul[1]/a',
+            'chapter_link': '/html/body/main/div[2]/div[3]/div/div[2]/div/div[1]/ul[1]/a[num]',
+            'chapter_image_parent': '/html/body/div[2]/div/ul/li',
+            'chapter_image': '/html/body/div[2]/div/ul/li[num]/img'
+        },
+        'image_attr': 'data-src',
         'chapter_group_size': None
     }
 }
