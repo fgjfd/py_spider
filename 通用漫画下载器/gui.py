@@ -114,13 +114,24 @@ class GenericComicDownloaderGUI:
         self.cookie_frame = ttk.Frame(self.main_frame)
         
         ttk.Label(self.cookie_frame, text="Cookie:", width=10).pack(side=tk.LEFT, padx=5)
-        self.cookie_var = tk.StringVar()
-        self.cookie_entry = ttk.Entry(
-            self.cookie_frame, 
-            textvariable=self.cookie_var, 
-            font=("微软雅黑", 10)
+        
+        cookie_input_frame = ttk.Frame(self.cookie_frame)
+        cookie_input_frame.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        
+        self.cookie_text = tk.Text(
+            cookie_input_frame, 
+            font=("微软雅黑", 9),
+            height=2,
+            wrap=tk.CHAR
         )
-        self.cookie_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        self.cookie_text.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        
+        ttk.Button(
+            cookie_input_frame,
+            text="从文件加载",
+            command=self.load_cookie_from_file,
+            width=10
+        ).pack(side=tk.LEFT, padx=5)
         
         self.thread_frame = ttk.Frame(self.main_frame)
         
@@ -192,6 +203,9 @@ class GenericComicDownloaderGUI:
         def on_site_change(*args):
             site_name = self.site_var.get()
             if site_name == "快看":
+                self.cookie_frame.pack(fill=tk.X, pady=5, after=self.num_frame)
+                self.thread_frame.pack_forget()
+            elif site_name == "腾讯动漫":
                 self.cookie_frame.pack(fill=tk.X, pady=5, after=self.num_frame)
                 self.thread_frame.pack_forget()
             elif site_name == "拷贝漫画":
@@ -390,6 +404,21 @@ class GenericComicDownloaderGUI:
             font=("微软雅黑", 10, "bold")
         )
     
+    def load_cookie_from_file(self):
+        path = filedialog.askopenfilename(
+            title="选择Cookie文件",
+            filetypes=[("文本文件", "*.txt"), ("所有文件", "*.*")]
+        )
+        if path:
+            try:
+                with open(path, 'r', encoding='utf-8') as f:
+                    cookie_content = f.read().strip()
+                self.cookie_text.delete("1.0", tk.END)
+                self.cookie_text.insert("1.0", cookie_content)
+                self.append_status(f"已从文件加载Cookie ({len(cookie_content)} 字符)")
+            except Exception as e:
+                self.append_status(f"加载Cookie文件失败: {e}")
+    
     def browse_path(self):
         path = filedialog.askdirectory(title="选择下载路径")
         if path:
@@ -514,7 +543,7 @@ class GenericComicDownloaderGUI:
             self.append_status(f"浏览器模式: {'无头' if headless else '有头'}")
 
             self.append_status("正在启动浏览器...")
-            cookie = self.cookie_var.get().strip() if site_name == "快看" else None
+            cookie = self.cookie_text.get("1.0", tk.END).strip() if site_name in ["快看", "腾讯动漫"] else None
             crawler = ComicCrawler(site_name, browser_path, headless, cookie)
             
             try:

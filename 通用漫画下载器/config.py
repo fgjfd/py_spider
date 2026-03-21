@@ -52,5 +52,19 @@ SITES = {
         },
         'image_attr': 'data-src',
         'chapter_group_size': None
+    },
+    '腾讯动漫': {
+        'site_url': 'https://ac.qq.com/',
+        'xpaths': {
+            'search_input': '/html/body/div[2]/div[2]/div[1]/div/div[2]/div/div[1]/input',
+            'search_button': '/html/body/div[2]/div[2]/div[1]/div/div[2]/div/button',
+            'search_result': '/html/body/div[3]/ul/li[1]/a',
+            'cover_image': '/html/body/div[3]/div[3]/div/div/div[1]/a/img',
+            'chapter_list_container': '/html/body/div[3]/em/div[2]/div[2]/div/div[2]/ol[1]/li',
+            'chapter_image_parent': '/html/body/div[5]/ul/li',
+            'chapter_image': '/html/body/div[5]/ul/li[num]/img'
+        },
+        'image_attr': 'src',
+        'chapter_group_size': None
     }
 }
