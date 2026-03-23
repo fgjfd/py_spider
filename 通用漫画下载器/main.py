@@ -1,5 +1,4 @@
 # 主脚本文件 - 通用漫画下载器
-# 完全照抄各站点原有crawler逻辑，只下载、压缩等部分通用
 import os
 import asyncio
 from crawler import ComicCrawler

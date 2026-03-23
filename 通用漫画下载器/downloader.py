@@ -379,7 +379,7 @@ def save_image_urls_to_json(all_chapters_data, comic_name, base_path=None):
     return json_path
 
 
-async def download_all_chapters(all_chapters_data, comic_name, base_path=None, save_json_only=False, concurrent_limit=3, download_thread_count=4, use_thread_coroutine=True, progress_callback=None, max_retries=3, use_thread_only=False, first_timeout=8, retry_timeout=15):
+async def download_all_chapters(all_chapters_data, comic_name, base_path=None, save_json_only=False, concurrent_limit=3, download_thread_count=4, use_thread_coroutine=True, progress_callback=None, max_retries=3, use_thread_only=False, first_timeout=8, retry_timeout=15, export_format='original', pdf_mode='per_chapter'):
     """下载所有章节，可选只保存JSON不下载
     
     Args:
@@ -387,6 +387,8 @@ async def download_all_chapters(all_chapters_data, comic_name, base_path=None, s
         use_thread_only: 是否使用纯多线程模式（不使用协程）
         first_timeout: 首次下载超时时间（秒）
         retry_timeout: 重试超时时间（秒）
+        export_format: 导出格式 ('original' 或 'pdf')
+        pdf_mode: PDF模式 ('per_chapter' 或 'single')
     
     Returns:
         tuple: (failed_list, failed_json_path, should_zip)
@@ -468,6 +470,18 @@ async def download_all_chapters(all_chapters_data, comic_name, base_path=None, s
         if os.path.exists(failed_json_path):
             os.remove(failed_json_path)
             print(f"已删除failed_images.json（全部成功）")
+    
+    # 如果需要转换为PDF
+    if export_format == 'pdf':
+        from utils import convert_comic_to_pdf
+        print(f"\n{'='*50}")
+        print(f"开始转换为PDF...")
+        print(f"{'='*50}")
+        
+        if convert_comic_to_pdf(comic_name, base_path, pdf_mode):
+            print(f"PDF转换完成！")
+        else:
+            print(f"PDF转换失败！")
     
     print(f"{'='*50}")
     return [], None, True  # 全部成功，可以压缩
