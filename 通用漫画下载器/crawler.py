@@ -17,7 +17,7 @@ class ComicCrawler:
         
         self.site_name = site_name
         self.site_config = SITES[site_name]
-        self.xpaths = self.site_config['xpaths']
+        self.locators = self.site_config['locators']
         self.image_attr = self.site_config['image_attr']
         self.cookie_str = cookie_str
         
@@ -133,12 +133,12 @@ class ComicCrawler:
         if self.cookie_str:
             self.set_cookie()
         
-        self.tab.ele(f"xpath:{self.xpaths['search_input']}").input(comic_name)
-        self.tab.ele(f"xpath:{self.xpaths['search_button']}").click()
+        self.tab.ele(self.locators['search_input']).input(comic_name)
+        self.tab.ele(self.locators['search_button']).click()
         
         time.sleep(0.5)
         
-        target_comic_list = self.tab.ele(f"xpath:{self.xpaths['search_result']}")
+        target_comic_list = self.tab.ele(self.locators['search_result'])
         target_comic_tab = target_comic_list.click.for_new_tab()
         
         return target_comic_tab
@@ -147,12 +147,12 @@ class ComicCrawler:
         """好多漫搜索逻辑 - 好多漫文件夹"""
         self.tab.get(self.site_config['site_url'])
         
-        self.tab.ele(f"xpath:{self.xpaths['search_input']}").input(comic_name)
-        self.tab.ele(f"xpath:{self.xpaths['search_button']}").click()
+        self.tab.ele(self.locators['search_input']).input(comic_name)
+        self.tab.ele(self.locators['search_button']).click()
         
         time.sleep(0.5)
         
-        target_comic_list = self.tab.ele(f"xpath:{self.xpaths['search_result']}")
+        target_comic_list = self.tab.ele(self.locators['search_result'])
         href = target_comic_list.attr('href')
         target_comic_tab = self.tab.new_tab(href)
         
@@ -169,14 +169,14 @@ class ComicCrawler:
         time.sleep(2)
         
         print(f"开始查找搜索结果...")
-        print(f"使用的XPath: {self.xpaths['search_result']}")
+        print(f"使用的定位器: {self.locators['search_result']}")
         
         max_wait_time = 15
         start_time = time.time()
         
         while time.time() - start_time < max_wait_time:
             try:
-                result = self.tab.ele(f"xpath:{self.xpaths['search_result']}", timeout=0)
+                result = self.tab.ele(self.locators['search_result'], timeout=0)
                 if result:
                     print(f"找到搜索结果元素")
                     href = result.attr('href')
@@ -215,17 +215,17 @@ class ComicCrawler:
             self.set_cookie()
         
         print(f"输入搜索关键词...")
-        self.tab.ele(f"xpath:{self.xpaths['search_input']}").input(comic_name)
+        self.tab.ele(f"{self.locators['search_input']}").input(comic_name)
         
         print(f"点击搜索按钮...")
-        self.tab.ele(f"xpath:{self.xpaths['search_button']}").click()
+        self.tab.ele(self.locators['search_button']).click()
         
         print(f"等待搜索结果加载...")
         time.sleep(2)
         
         try:
-            print(f"查找搜索结果 (xpath: {self.xpaths['search_result']})")
-            result = self.tab.ele(f"xpath:{self.xpaths['search_result']}", timeout=10)
+            print(f"查找搜索结果 (定位器: {self.locators['search_result']})")
+            result = self.tab.ele(self.locators['search_result'], timeout=10)
             print(f"找到搜索结果元素")
             
             href = result.attr('href')
@@ -251,7 +251,7 @@ class ComicCrawler:
     def get_cover_image(self, target_comic_tab):
         """获取封面图片"""
         try:
-            coverimg_xpath = "xpath:" + self.xpaths['cover_image']
+            coverimg_xpath = self.locators['cover_image']
             coverimg_url = target_comic_tab.ele(coverimg_xpath).attr(self.image_attr)
             print(f"封面图片URL: {coverimg_url}")
             return coverimg_url
@@ -262,16 +262,16 @@ class ComicCrawler:
     def get_chapter_count(self, target_comic_tab):
         """获取章节数量"""
         if self.site_name == '快看':
-            chapter_list_xpath = self.xpaths['chapter_list']
-            chapter_eles = target_comic_tab.eles("xpath:" + chapter_list_xpath)
+            chapter_list_xpath = self.locators['chapter_list']
+            chapter_eles = target_comic_tab.eles(chapter_list_xpath)
             return len(chapter_eles)
         elif self.site_name == '好多漫':
-            chapter_list_xpath = self.xpaths['chapter_list']
-            chapter_eles = target_comic_tab.eles("xpath:" + chapter_list_xpath)
+            chapter_list_xpath = self.locators['chapter_list']
+            chapter_eles = target_comic_tab.eles(chapter_list_xpath)
             return len(chapter_eles)
         elif self.site_name == '拷贝漫画':
-            chapter_list_xpath = self.xpaths['chapter_list']
-            chapter_eles = target_comic_tab.eles("xpath:" + chapter_list_xpath)
+            chapter_list_xpath = self.locators['chapter_list']
+            chapter_eles = target_comic_tab.eles(chapter_list_xpath)
             return len(chapter_eles)
         elif self.site_name == '腾讯动漫':
             return self.get_chapter_count_tencent(target_comic_tab)
@@ -281,18 +281,18 @@ class ComicCrawler:
         """腾讯动漫获取章节数量 - 遍历所有li、p、span"""
         total_count = 0
         try:
-            li_eles = target_comic_tab.eles(f"xpath:{self.xpaths['chapter_list_container']}")
+            li_eles = target_comic_tab.eles(self.locators['chapter_list_container'])
             total_li = len(li_eles)
             print(f"总共有 {total_li} 个li标签")
             
             for li_idx in range(1, total_li + 1):
                 try:
-                    p_eles = target_comic_tab.eles(f"xpath:{self.xpaths['chapter_list_container']}[{li_idx}]/p")
+                    p_eles = target_comic_tab.eles(f"{self.locators['chapter_list_container']}[{li_idx}]/p")
                     total_p = len(p_eles)
                     
                     for p_idx in range(1, total_p + 1):
                         try:
-                            span_eles = target_comic_tab.eles(f"xpath:{self.xpaths['chapter_list_container']}[{li_idx}]/p[{p_idx}]/span")
+                            span_eles = target_comic_tab.eles(f"{self.locators['chapter_list_container']}[{li_idx}]/p[{p_idx}]/span")
                             total_span = len(span_eles)
                             total_count += total_span
                         except:
@@ -325,7 +325,7 @@ class ComicCrawler:
 
 # ========== 快看完整逻辑 -  ==========
 
-def get_chapter_image_urls_kuaikan(chapter_tab, max_img_num, xpaths, image_attr):
+def get_chapter_image_urls_kuaikan(chapter_tab, max_img_num, locators, image_attr):
     """快看获取单个章节图片URL - """
     herf_list = []
     
@@ -333,8 +333,8 @@ def get_chapter_image_urls_kuaikan(chapter_tab, max_img_num, xpaths, image_attr)
     
     for num in range(1, max_img_num + 1):
         try:
-            img_xpath = xpaths['chapter_image'].replace("num", str(num))
-            img_ele = chapter_tab.ele(f"xpath:{img_xpath}", timeout=3)
+            img_xpath = locators['chapter_image'].replace("num", str(num))
+            img_ele = chapter_tab.ele(img_xpath, timeout=3)
             herf = img_ele.attr(image_attr)
             
             if is_normal_url(herf):
@@ -349,7 +349,7 @@ def get_chapter_image_urls_kuaikan(chapter_tab, max_img_num, xpaths, image_attr)
     return herf_list
 
 
-def collect_chapter_images_kuaikan(chapter_info, xpaths, image_attr, max_wait_time=3):
+def collect_chapter_images_kuaikan(chapter_info, locators, image_attr, max_wait_time=3):
     """快看收集单个章节
     
     Args:
@@ -370,7 +370,7 @@ def collect_chapter_images_kuaikan(chapter_info, xpaths, image_attr, max_wait_ti
         max_img_num = 0
         
         while retry_count <= max_retries:
-            img_elements = chapter_tab.eles("xpath:" + xpaths['chapter_image_parent'])
+            img_elements = chapter_tab.eles(locators['chapter_image_parent'])
             max_img_num = len(img_elements)
             
             if max_img_num > 0:
@@ -395,7 +395,7 @@ def collect_chapter_images_kuaikan(chapter_info, xpaths, image_attr, max_wait_ti
             else:
                 time.sleep(0.5)
         
-        herf_list = get_chapter_image_urls_kuaikan(chapter_tab, max_img_num, xpaths, image_attr)
+        herf_list = get_chapter_image_urls_kuaikan(chapter_tab, max_img_num, locators, image_attr)
         
     except Exception as e:
         print(f"处理章节{chapter_num}时出错: {e}")
@@ -409,11 +409,11 @@ def collect_chapter_images_kuaikan(chapter_info, xpaths, image_attr, max_wait_ti
     }
 
 
-def click_chapter_group_kuaikan(target_comic_tab, group_index, xpaths):
+def click_chapter_group_kuaikan(target_comic_tab, group_index, locators):
     """快看点击章节组 - """
     try:
-        group_button_xpath = f"{xpaths['chapter_group_button']}[{group_index}]"
-        group_button = target_comic_tab.ele(f"xpath:{group_button_xpath}")
+        group_button_xpath = f"{locators['chapter_group_button']}[{group_index}]"
+        group_button = target_comic_tab.ele(group_button_xpath)
         group_button.click()
         time.sleep(0.5)
         print(f"点击第{group_index}组按钮")
@@ -427,8 +427,8 @@ def collect_chapters_images_kuaikan(self, target_comic_tab, chapter_start=1, cha
     """快看完整章节收集逻辑 - """
     print(f"设置最大同时收集线程数: {max_threads}")
 
-    chapter_list_xpath = self.xpaths['chapter_list']
-    chapter_eles = target_comic_tab.eles("xpath:" + chapter_list_xpath)
+    chapter_list_xpath = self.locators['chapter_list']
+    chapter_eles = target_comic_tab.eles(chapter_list_xpath)
     all_chapters_num = len(chapter_eles)
     print(f"总章节数: {all_chapters_num}")
     
@@ -448,9 +448,9 @@ def collect_chapters_images_kuaikan(self, target_comic_tab, chapter_start=1, cha
 
     while current_chapter <= actual_comic_num:
         group_index = (current_chapter - 1) // 50 + 1
-        click_chapter_group_kuaikan(target_comic_tab, group_index, self.xpaths)
+        click_chapter_group_kuaikan(target_comic_tab, group_index, self.locators)
         
-        chapter_eles = target_comic_tab.eles("xpath:" + chapter_list_xpath)
+        chapter_eles = target_comic_tab.eles(chapter_list_xpath)
         chapters_in_group = len(chapter_eles)
         
         group_end = min(current_chapter + max_threads - 1, actual_comic_num)
@@ -463,7 +463,7 @@ def collect_chapters_images_kuaikan(self, target_comic_tab, chapter_start=1, cha
             try:
                 chapter_index_in_group = (num - 1) % 50 + 1
                 chapter_xpath = f"{chapter_list_xpath}[{chapter_index_in_group}]"
-                chapter_ele = target_comic_tab.ele(f"xpath:{chapter_xpath}")
+                chapter_ele = target_comic_tab.ele(chapter_xpath)
                 chapter_tab = chapter_ele.click.for_new_tab()
 
                 batch_chapters_info.append({
@@ -480,7 +480,7 @@ def collect_chapters_images_kuaikan(self, target_comic_tab, chapter_start=1, cha
         results = []
 
         def thread_wrapper(chapter_info):
-            result = collect_chapter_images_kuaikan(chapter_info, self.xpaths, self.image_attr)
+            result = collect_chapter_images_kuaikan(chapter_info, self.locators, self.image_attr)
             results.append(result)
 
         for chapter_info in batch_chapters_info:
@@ -502,7 +502,7 @@ def collect_chapters_images_kuaikan(self, target_comic_tab, chapter_start=1, cha
 
 # ========== 拷贝漫画完整逻辑 ==========
 
-def get_chapter_image_urls_mangacopy(chapter_tab, max_img_num, xpaths, image_attr):
+def get_chapter_image_urls_mangacopy(chapter_tab, max_img_num, locators, image_attr):
     """拷贝漫画获取单个章节图片URL - 先滚动到底部再获取"""
     herf_list = []
     
@@ -524,7 +524,7 @@ def get_chapter_image_urls_mangacopy(chapter_tab, max_img_num, xpaths, image_att
         
         while scroll_count < max_scrolls:
             # 每次重新获取DOM检测当前图片数
-            img_elements = chapter_tab.eles("xpath:" + xpaths['chapter_image_parent'])
+            img_elements = chapter_tab.eles(locators['chapter_image_parent'])
             actual_img_num = len(img_elements)
             
             print(f"当前已加载{actual_img_num}张图片，目标{expected_img_num}张，已滚动{scroll_count}次")
@@ -540,7 +540,7 @@ def get_chapter_image_urls_mangacopy(chapter_tab, max_img_num, xpaths, image_att
             scroll_count += 1
         
         # 3. 最终获取图片数量
-        img_elements = chapter_tab.eles("xpath:" + xpaths['chapter_image_parent'])
+        img_elements = chapter_tab.eles(locators['chapter_image_parent'])
         actual_img_num = len(img_elements)
         
         print(f"最终检测到{actual_img_num}张图片")
@@ -561,8 +561,8 @@ def get_chapter_image_urls_mangacopy(chapter_tab, max_img_num, xpaths, image_att
         print(f"开始获取图片URL，共{actual_img_num}张...")
         for num in range(1, actual_img_num + 1):
             try:
-                img_xpath = f"/html/body/div[2]/div/ul/li[{num}]/img"
-                img_ele = chapter_tab.ele(f"xpath:{img_xpath}", timeout=3)
+                img_xpath = f"xpath:/html/body/div[2]/div/ul/li[{num}]/img"
+                img_ele = chapter_tab.ele(img_xpath, timeout=3)
                 herf = img_ele.attr('data-src')
                 
                 if is_normal_url(herf):
@@ -580,7 +580,7 @@ def get_chapter_image_urls_mangacopy(chapter_tab, max_img_num, xpaths, image_att
     return herf_list
 
 
-def collect_chapter_images_mangacopy(chapter_info, xpaths, image_attr, max_wait_time=3):
+def collect_chapter_images_mangacopy(chapter_info, locators, image_attr, max_wait_time=3):
     """拷贝漫画收集单个章节
     
     Args:
@@ -602,7 +602,7 @@ def collect_chapter_images_mangacopy(chapter_info, xpaths, image_attr, max_wait_
         max_img_num = 0
         
         while retry_count <= max_retries:
-            img_elements = chapter_tab.eles("xpath:" + xpaths['chapter_image_parent'])
+            img_elements = chapter_tab.eles(locators['chapter_image_parent'])
             max_img_num = len(img_elements)
             
             if max_img_num > 0:
@@ -627,7 +627,7 @@ def collect_chapter_images_mangacopy(chapter_info, xpaths, image_attr, max_wait_
             else:
                 time.sleep(0.5)
         
-        herf_list = get_chapter_image_urls_mangacopy(chapter_tab, max_img_num, xpaths, image_attr)
+        herf_list = get_chapter_image_urls_mangacopy(chapter_tab, max_img_num, locators, image_attr)
         
         chapter_tab.close()
         
@@ -645,8 +645,8 @@ def collect_chapters_images_mangacopy(self, target_comic_tab, chapter_start=1, c
     """拷贝漫画完整章节收集逻辑"""
     print(f"设置最大同时收集线程数: {max_threads}")
     
-    chapter_list_xpath = self.xpaths['chapter_list']
-    chapter_eles = target_comic_tab.eles("xpath:" + chapter_list_xpath)
+    chapter_list_xpath = self.locators['chapter_list']
+    chapter_eles = target_comic_tab.eles(chapter_list_xpath)
     all_chapters_num = len(chapter_eles)
     print(f"总章节数: {all_chapters_num}")
     
@@ -692,7 +692,7 @@ def collect_chapters_images_mangacopy(self, target_comic_tab, chapter_start=1, c
         results = []
         
         def thread_wrapper(chapter_info):
-            result = collect_chapter_images_mangacopy(chapter_info, self.xpaths, self.image_attr)
+            result = collect_chapter_images_mangacopy(chapter_info, self.locators, self.image_attr)
             results.append(result)
         
         for chapter_info in batch_chapters_info:
@@ -714,7 +714,7 @@ def collect_chapters_images_mangacopy(self, target_comic_tab, chapter_start=1, c
 
 # ========== 腾讯动漫完整逻辑 ==========
 
-def get_chapter_urls_tencent(target_comic_tab, xpaths):
+def get_chapter_urls_tencent(target_comic_tab, locators):
     """腾讯动漫获取所有章节URL - 遍历li/p/span结构"""
     chapter_urls = []
     
@@ -723,7 +723,7 @@ def get_chapter_urls_tencent(target_comic_tab, xpaths):
     print(f"漫画页面标题: {target_comic_tab.title}")
     
     try:
-        li_eles = target_comic_tab.eles(f"xpath:{xpaths['chapter_list_container']}")
+        li_eles = target_comic_tab.eles(locators['chapter_list_container'])
         total_li = len(li_eles)
         print(f"总共有 {total_li} 个li标签")
         
@@ -731,21 +731,21 @@ def get_chapter_urls_tencent(target_comic_tab, xpaths):
         for li_idx in range(1, total_li + 1):
             print(f"\n--- 处理第 {li_idx} 个li标签 ---")
             try:
-                p_eles = target_comic_tab.eles(f"xpath:{xpaths['chapter_list_container']}[{li_idx}]/p")
+                p_eles = target_comic_tab.eles(f"{locators['chapter_list_container']}[{li_idx}]/p")
                 total_p = len(p_eles)
                 print(f"  li[{li_idx}] 中有 {total_p} 个p标签")
                 
                 for p_idx in range(1, total_p + 1):
                     print(f"  处理 li[{li_idx}]/p[{p_idx}]")
                     try:
-                        span_eles = target_comic_tab.eles(f"xpath:{xpaths['chapter_list_container']}[{li_idx}]/p[{p_idx}]/span")
+                        span_eles = target_comic_tab.eles(f"{locators['chapter_list_container']}[{li_idx}]/p[{p_idx}]/span")
                         total_span = len(span_eles)
                         print(f"    p[{p_idx}] 中有 {total_span} 个span标签")
                         
                         for span_idx in range(1, total_span + 1):
                             try:
                                 chapter_num += 1
-                                a_ele = target_comic_tab.ele(f"xpath:{xpaths['chapter_list_container']}[{li_idx}]/p[{p_idx}]/span[{span_idx}]/a")
+                                a_ele = target_comic_tab.ele(f"{locators['chapter_list_container']}[{li_idx}]/p[{p_idx}]/span[{span_idx}]/a")
                                 href = a_ele.attr('href')
                                 if href:
                                     chapter_urls.append({
@@ -776,7 +776,7 @@ def get_chapter_urls_tencent(target_comic_tab, xpaths):
     return chapter_urls
 
 
-def get_chapter_image_urls_tencent(chapter_tab, xpaths):
+def get_chapter_image_urls_tencent(chapter_tab, locators):
     """腾讯动漫获取单个章节图片URL - 懒加载处理"""
     herf_list = []
     
@@ -785,15 +785,15 @@ def get_chapter_image_urls_tencent(chapter_tab, xpaths):
     print(f"章节页面标题: {chapter_tab.title}")
     
     try:
-        print(f"获取特定xpath的li标签: {xpaths['chapter_image_parent']}")
-        li_eles = chapter_tab.eles(f"xpath:{xpaths['chapter_image_parent']}")
+        print(f"获取定位器对应的li标签: {locators['chapter_image_parent']}")
+        li_eles = chapter_tab.eles(locators['chapter_image_parent'])
         total_li = len(li_eles)
         print(f"总共找到 {total_li} 个li标签")
         
         valid_indices = []
         for idx in range(1, total_li + 1):
             try:
-                li_ele = chapter_tab.ele(f"xpath:{xpaths['chapter_image_parent']}[{idx}]")
+                li_ele = chapter_tab.ele(f"{locators['chapter_image_parent']}[{idx}]")
                 style = li_ele.attr('style')
                 if style:
                     valid_indices.append(idx)
@@ -807,7 +807,7 @@ def get_chapter_image_urls_tencent(chapter_tab, xpaths):
         for idx in valid_indices:
             try:
                 print(f"\n--- 处理第 {idx} 张图片 ---")
-                li_ele = chapter_tab.ele(f"xpath:{xpaths['chapter_image_parent']}[{idx}]")
+                li_ele = chapter_tab.ele(f"{locators['chapter_image_parent']}[{idx}]")
                 print(f"  找到li元素")
                 
                 try:
@@ -816,12 +816,12 @@ def get_chapter_image_urls_tencent(chapter_tab, xpaths):
                 except Exception as scroll_err:
                     print(f"  scroll.to_see()失败: {scroll_err}")
                 
-                img_xpath = xpaths['chapter_image'].replace("[num]", f"[{idx}]")
-                print(f"  使用xpath: {img_xpath}")
+                img_xpath = locators['chapter_image'].replace("[num]", f"[{idx}]")
+                print(f"  使用定位器: {img_xpath}")
                 
                 max_retry = 5
                 for retry in range(max_retry):
-                    img_ele = chapter_tab.ele(f"xpath:{img_xpath}")
+                    img_ele = chapter_tab.ele(img_xpath)
                     
                     if img_ele:
                         img_url = img_ele.attr('src')
@@ -863,7 +863,7 @@ def get_chapter_image_urls_tencent(chapter_tab, xpaths):
     return herf_list
 
 
-def collect_chapter_images_tencent(chapter_info, xpaths, image_attr, max_wait_time=5):
+def collect_chapter_images_tencent(chapter_info, locators, image_attr, max_wait_time=5):
     """腾讯动漫收集单个章节"""
     chapter_num = chapter_info['chapter_num']
     chapter_url = chapter_info['url']
@@ -884,8 +884,8 @@ def collect_chapter_images_tencent(chapter_info, xpaths, image_attr, max_wait_ti
         max_retries = 3
         
         while retry_count <= max_retries:
-            li_eles = chapter_tab.eles(f"xpath:{xpaths['chapter_image_parent']}")
-            print(f"检测到 {len(li_eles)} 个li标签 (xpath: {xpaths['chapter_image_parent']})")
+            li_eles = chapter_tab.eles(locators['chapter_image_parent'])
+            print(f"检测到 {len(li_eles)} 个li标签 (定位器: {locators['chapter_image_parent']})")
             
             if len(li_eles) > 0:
                 print(f"章节{chapter_num}检测到{len(li_eles)}个li标签，开始获取图片")
@@ -911,7 +911,7 @@ def collect_chapter_images_tencent(chapter_info, xpaths, image_attr, max_wait_ti
             else:
                 time.sleep(0.5)
         
-        herf_list = get_chapter_image_urls_tencent(chapter_tab, xpaths)
+        herf_list = get_chapter_image_urls_tencent(chapter_tab, locators)
         
         print(f"章节{chapter_num}获取完成，共{len(herf_list)}张图片")
         chapter_tab.close()
@@ -932,7 +932,7 @@ def collect_chapters_images_tencent(self, target_comic_tab, chapter_start=1, cha
     """腾讯动漫完整章节收集逻辑"""
     print(f"设置最大同时收集线程数: {max_threads}")
     
-    chapter_urls = get_chapter_urls_tencent(target_comic_tab, self.xpaths)
+    chapter_urls = get_chapter_urls_tencent(target_comic_tab, self.locators)
     total_chapters = len(chapter_urls)
     print(f"总章节数: {total_chapters}")
     
@@ -972,7 +972,7 @@ def collect_chapters_images_tencent(self, target_comic_tab, chapter_start=1, cha
         results = []
         
         def thread_wrapper(chapter_info):
-            result = collect_chapter_images_tencent(chapter_info, self.xpaths, self.image_attr)
+            result = collect_chapter_images_tencent(chapter_info, self.locators, self.image_attr)
             results.append(result)
         
         for chapter_info in batch_chapters_info:
@@ -994,14 +994,14 @@ def collect_chapters_images_tencent(self, target_comic_tab, chapter_start=1, cha
 
 # ========== 好多漫完整逻辑 -  ==========
 
-def get_chapter_image_urls_haoduoman(chapter_tab, max_img_num, xpaths, image_attr):
+def get_chapter_image_urls_haoduoman(chapter_tab, max_img_num, locators, image_attr):
     """好多漫获取单个章节图片URL - """
     herf_list = []
     
     for num in range(1, max_img_num + 1):
         try:
-            div_xpath = xpaths['chapter_image_data_original'].replace("num", str(num))
-            div_ele = chapter_tab.ele(f"xpath:{div_xpath}", timeout=3)
+            div_xpath = locators['chapter_image_data_original'].replace("num", str(num))
+            div_ele = chapter_tab.ele(div_xpath, timeout=3)
             herf = div_ele.attr(image_attr)
             
             if is_normal_url(herf):
@@ -1016,7 +1016,7 @@ def get_chapter_image_urls_haoduoman(chapter_tab, max_img_num, xpaths, image_att
     return herf_list
 
 
-def collect_chapter_images_haoduoman(chapter_info, xpaths, image_attr, max_wait_time=3):
+def collect_chapter_images_haoduoman(chapter_info, locators, image_attr, max_wait_time=3):
     """好多漫收集单个章节
     
     Args:
@@ -1039,7 +1039,7 @@ def collect_chapter_images_haoduoman(chapter_info, xpaths, image_attr, max_wait_
         max_img_num = 0
         
         while retry_count <= max_retries:
-            img_elements = chapter_tab.eles("xpath:" + xpaths['chapter_image_parent'])
+            img_elements = chapter_tab.eles(locators['chapter_image_parent'])
             max_img_num = len(img_elements)
             
             if max_img_num > 0:
@@ -1064,7 +1064,7 @@ def collect_chapter_images_haoduoman(chapter_info, xpaths, image_attr, max_wait_
             else:
                 time.sleep(0.5)
         
-        herf_list = get_chapter_image_urls_haoduoman(chapter_tab, max_img_num, xpaths, image_attr)
+        herf_list = get_chapter_image_urls_haoduoman(chapter_tab, max_img_num, locators, image_attr)
         
         chapter_tab.close()
         
@@ -1082,13 +1082,13 @@ def collect_chapters_images_haoduoman(self, target_comic_tab, chapter_start=1, c
     """好多漫完整章节收集逻辑 - """
     print(f"设置最大同时收集线程数: {max_threads}")
     
-    chapter_list_xpath = self.xpaths['chapter_list']
-    chapter_eles = target_comic_tab.eles("xpath:" + chapter_list_xpath)
+    chapter_list_xpath = self.locators['chapter_list']
+    chapter_eles = target_comic_tab.eles(chapter_list_xpath)
     all_chapters_num = len(chapter_eles)
     print(f"总章节数: {all_chapters_num}")
     
-    first_chapter_xpath = self.xpaths['chapter_link'].replace("num", "1")
-    first_chapter_ele = target_comic_tab.ele(f"xpath:{first_chapter_xpath}", timeout=5)
+    first_chapter_xpath = self.locators['chapter_link'].replace("num", "1")
+    first_chapter_ele = target_comic_tab.ele(first_chapter_xpath, timeout=5)
     first_chapter_href = first_chapter_ele.attr("href")
     print(f"第一个章节链接: {first_chapter_href}")
     
@@ -1126,7 +1126,7 @@ def collect_chapters_images_haoduoman(self, target_comic_tab, chapter_start=1, c
         results = []
         
         def thread_wrapper(chapter_info):
-            result = collect_chapter_images_haoduoman(chapter_info, self.xpaths, self.image_attr)
+            result = collect_chapter_images_haoduoman(chapter_info, self.locators, self.image_attr)
             results.append(result)
         
         for chapter_info in batch_chapters_info:
