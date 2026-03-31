@@ -52,8 +52,6 @@ SITES = {
     '拷贝漫画': {
         'site_url': 'https://www.mangacopy.com/comics',
         'locators': {
-            'search_input': 'xpath:/html/body/header/div/div/div[8]/div/div/div/div/input',
-            'search_button': 'xpath:/html/body/header/div/div/div[8]/div/div/div/div/div',
             'search_result': 'xpath:/html/body/main/div[2]/div/div/div[1]/div[1]/div[1]/a',
             'cover_image': 'xpath:/html/body/main/div[1]/div/div[1]/div/img',
             'chapter_list': 'xpath:/html/body/main/div[2]/div[3]/div/div[2]/div/div[1]/ul[1]/a',

@@ -86,7 +86,7 @@ def main():
         
         if all_chapters_data:
             print("\n开始下载章节图片...")
-            failed_downloads, failed_json_path = asyncio.run(
+            failed_downloads, failed_json_path, _ = asyncio.run(
                 download_all_chapters(
                     all_chapters_data, 
                     comic_name, 

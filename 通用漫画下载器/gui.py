@@ -324,11 +324,7 @@ class GenericComicDownloaderGUI:
             command=self.download_failed_images
         ).pack(side=tk.LEFT, padx=5)
         
-        ttk.Button(
-            self.button_frame,
-            text="图片转PDF",
-            command=self.convert_to_pdf
-        ).pack(side=tk.LEFT, padx=5)
+
         
         ttk.Button(
             self.button_frame,
@@ -385,26 +381,7 @@ class GenericComicDownloaderGUI:
         )
         self.progress_bar.pack(fill=tk.X, pady=5)
         
-        self.pdf_progress_frame = ttk.LabelFrame(self.main_frame, text="PDF转换进度", padding="10")
-        self.pdf_progress_frame.pack(fill=tk.X, pady=5)
-        
-        self.pdf_info_frame = ttk.Frame(self.pdf_progress_frame)
-        self.pdf_info_frame.pack(fill=tk.X, pady=5)
-        
-        self.pdf_progress_label = ttk.Label(
-            self.pdf_info_frame,
-            text="进度: 0/0 个章节",
-            font=("微软雅黑", 10)
-        )
-        self.pdf_progress_label.pack(side=tk.LEFT, padx=5)
-        
-        self.pdf_progress_bar = ttk.Progressbar(
-            self.pdf_progress_frame,
-            orient=tk.HORIZONTAL,
-            mode='determinate',
-            length=600
-        )
-        self.pdf_progress_bar.pack(fill=tk.X, pady=5)
+
         
         self.status_frame = ttk.LabelFrame(self.main_frame, text="下载状态", padding="10")
         self.status_frame.pack(fill=tk.BOTH, expand=True, pady=5)
@@ -502,21 +479,7 @@ class GenericComicDownloaderGUI:
         self.progress_label.config(text=f"进度: 0/{total_images} 张图片")
         self.speed_label.config(text="网速: 0 KB/s")
     
-    def reset_pdf_progress(self, total_chapters=0):
-        self.pdf_total_chapters = total_chapters
-        self.pdf_processed_chapters = 0
-        
-        self.pdf_progress_bar['value'] = 0
-        self.pdf_progress_bar['maximum'] = total_chapters if total_chapters > 0 else 1
-        self.pdf_progress_label.config(text=f"进度: 0/{total_chapters} 个章节")
-    
-    def update_pdf_progress(self, current, total, message=""):
-        self.pdf_progress_bar['value'] = current
-        self.pdf_progress_bar['maximum'] = total
-        self.pdf_progress_label.config(text=f"进度: {current}/{total} 个章节")
-        if message:
-            self.append_status(message)
-        self.root.update()
+
     
     def update_progress(self, downloaded_bytes=0):
         self.downloaded_images += 1
@@ -759,122 +722,7 @@ class GenericComicDownloaderGUI:
         retry_thread.daemon = True
         retry_thread.start()
 
-    def convert_to_pdf(self):
-        """将文件夹中的图片转换为PDF"""
-        folder_path = filedialog.askdirectory(title="选择包含图片的文件夹")
-        if not folder_path:
-            return
-        
-        dialog = tk.Toplevel(self.root)
-        dialog.title("选择PDF模式")
-        dialog.geometry("400x200")
-        dialog.resizable(False, False)
-        dialog.transient(self.root)
-        dialog.grab_set()
-        
-        dialog.update_idletasks()
-        x = self.root.winfo_x() + (self.root.winfo_width() - 400) // 2
-        y = self.root.winfo_y() + (self.root.winfo_height() - 200) // 2
-        dialog.geometry(f"+{x}+{y}")
-        
-        ttk.Label(dialog, text="请选择PDF转换模式:", font=("微软雅黑", 11)).pack(pady=10)
-        
-        pdf_mode_var = tk.StringVar(value="per_chapter")
-        
-        mode_frame = ttk.Frame(dialog)
-        mode_frame.pack(pady=5)
-        
-        ttk.Radiobutton(
-            mode_frame, 
-            text="每章一个PDF", 
-            variable=pdf_mode_var, 
-            value="per_chapter"
-        ).pack(side=tk.LEFT, padx=15)
-        
-        ttk.Radiobutton(
-            mode_frame, 
-            text="每张图片一个PDF", 
-            variable=pdf_mode_var, 
-            value="single"
-        ).pack(side=tk.LEFT, padx=15)
-        
-        thread_frame = ttk.Frame(dialog)
-        thread_frame.pack(pady=10)
-        
-        ttk.Label(thread_frame, text="线程数:", font=("微软雅黑", 10)).pack(side=tk.LEFT, padx=5)
-        pdf_thread_var = tk.StringVar(value="10")
-        pdf_thread_entry = ttk.Entry(
-            thread_frame, 
-            textvariable=pdf_thread_var, 
-            font=("微软雅黑", 10),
-            width=8
-        )
-        pdf_thread_entry.pack(side=tk.LEFT, padx=5)
-        ttk.Label(thread_frame, text="(推荐10)", font=("微软雅黑", 10)).pack(side=tk.LEFT, padx=5)
-        
-        button_frame = ttk.Frame(dialog)
-        button_frame.pack(pady=15)
-        
-        def start_convert():
-            dialog.destroy()
-            self._do_convert(folder_path, pdf_mode_var.get(), int(pdf_thread_var.get()))
-        
-        ttk.Button(button_frame, text="开始转换", command=start_convert).pack(side=tk.LEFT, padx=10)
-        ttk.Button(button_frame, text="取消", command=dialog.destroy).pack(side=tk.LEFT, padx=10)
-    
-    def _do_convert(self, folder_path, pdf_mode, max_workers=10):
-        """执行PDF转换"""
-        def convert_task():
-            try:
-                self.confirm_button.config(state=tk.DISABLED)
-                self.append_status(f"\n{'='*50}")
-                self.append_status(f"开始转换PDF...")
-                self.append_status(f"源文件夹: {folder_path}")
-                
-                mode_names = {
-                    'per_chapter': '每章一个PDF', 
-                    'single': '每张图片一个PDF'
-                }
-                self.append_status(f"模式: {mode_names.get(pdf_mode, pdf_mode)}")
-                self.append_status(f"线程数: {max_workers}")
-                self.append_status(f"{'='*50}")
-                
-                from utils import convert_folder_to_pdf
-                
-                def progress_callback(current, total, message):
-                    self.update_pdf_progress(current, total, message)
-                
-                success_count, fail_count, pdf_folder = convert_folder_to_pdf(
-                    folder_path, 
-                    pdf_mode, 
-                    False,
-                    progress_callback,
-                    max_workers=max_workers
-                )
-                
-                self.append_status(f"\n{'='*50}")
-                if fail_count == 0:
-                    self.append_status(f"✓ PDF转换完成！")
-                    self.append_status(f"成功: {success_count} 个")
-                    self.append_status(f"保存位置: {pdf_folder}")
-                    messagebox.showinfo("完成", f"PDF转换完成！\n\n成功: {success_count} 个\n保存位置: {pdf_folder}")
-                else:
-                    self.append_status(f"⚠️ PDF转换完成（有失败）")
-                    self.append_status(f"成功: {success_count} 个, 失败: {fail_count} 个")
-                    self.append_status(f"保存位置: {pdf_folder}")
-                    messagebox.showwarning("完成", f"PDF转换完成！\n\n成功: {success_count} 个\n失败: {fail_count} 个\n保存位置: {pdf_folder}")
-                
-            except Exception as e:
-                self.append_status(f"PDF转换出错: {e}")
-                import traceback
-                self.append_status(traceback.format_exc())
-                messagebox.showerror("错误", f"PDF转换出错: {e}")
-            finally:
-                self.confirm_button.config(state=tk.NORMAL)
-        
-        convert_thread = threading.Thread(target=convert_task)
-        convert_thread.daemon = True
-        convert_thread.start()
+
 
 
 def main():
